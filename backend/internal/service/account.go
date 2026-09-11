@@ -297,8 +297,9 @@ func (a *Account) IsCNProvider() bool {
 // IsOpenAICompatible 报告账号是否走 OpenAI 网关（OpenAI 协议族）。
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
+// CodeBuddy / WorkBuddy 上游仅提供 Chat Completions，同样经 OpenAI 网关转发。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo() || a.IsTencentCodeBuddy())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1346,8 +1347,12 @@ func (a *Account) IsOpenAIApiKey() bool {
 // 适用 openai、国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）与 OpenCode Go；
 // grok 走 GetGrokBaseURL，此处对 grok 返回 "" 以保持原有行为。
 func (a *Account) GetOpenAIBaseURL() string {
-	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() {
+	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() && !a.IsTencentCodeBuddy() {
 		return ""
+	}
+	// TencentCodeBuddyProvider：endpoint 由 product + region 内部固定，不接受账号级 base_url 覆盖。
+	if a.IsTencentCodeBuddy() {
+		return a.TencentCodeBuddyBaseURL()
 	}
 	if a.IsMultiProtocolAPIKey() && a.IsAdaptiveAPIProtocol() {
 		if baseURLs, ok := a.Credentials["api_base_urls"].(map[string]any); ok {
@@ -1751,6 +1756,11 @@ func (a *Account) GetOpenAIApiKey() string {
 func (a *Account) GetOpenAIProtocolAPIKey() string {
 	if a == nil {
 		return ""
+	}
+	// TencentCodeBuddyProvider：Bearer 为 credentials.access_token（会过期，由
+	// TencentCodeBuddyTokenRefresher 续期），而非静态 api_key。
+	if a.IsTencentCodeBuddy() {
+		return a.GetTencentCodeBuddyAccessToken()
 	}
 	if a.IsMultiProtocolAPIKey() {
 		if a.Type != AccountTypeAPIKey {

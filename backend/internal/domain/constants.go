@@ -31,7 +31,12 @@ const (
 	// PlatformOpenCodeGo 是 OpenCode 平台（账号类型 Zen 按量 / Go 订阅）。
 	// 值保持 opencode_go 以兼容已落库的分组、配额与 Composite 路由 CHECK。
 	PlatformOpenCodeGo = "opencode_go"
-	PlatformComposite  = "composite"
+	// PlatformTencentCodeBuddy 是腾讯 CodeBuddy / WorkBuddy（AI 编程助手）。
+	// 由独立的 TencentCodeBuddyProvider 负责接入：官方 endpoint 按
+	// product(workbuddy/codebuddy) + region(global/china) 内部固定，不接受
+	// 账号级 base_url；上游仅提供 Chat Completions（/v2/chat/completions）。
+	PlatformTencentCodeBuddy = "codebuddy"
+	PlatformComposite        = "composite"
 )
 
 // Account mode constants 区分国产供应商的「按量付费（余额）」与「Coding Plan」两种接入方式。

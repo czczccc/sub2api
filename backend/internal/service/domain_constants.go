@@ -44,12 +44,13 @@ const (
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
 	// 国产 OpenAI 兼容供应商（与 grok 一样经 OpenAI 网关转发）。
-	PlatformKimi       = domain.PlatformKimi
-	PlatformZhipu      = domain.PlatformZhipu
-	PlatformDeepseek   = domain.PlatformDeepseek
-	PlatformMiniMax    = domain.PlatformMiniMax
-	PlatformOpenCodeGo = domain.PlatformOpenCodeGo
-	PlatformComposite  = domain.PlatformComposite
+	PlatformKimi             = domain.PlatformKimi
+	PlatformZhipu            = domain.PlatformZhipu
+	PlatformDeepseek         = domain.PlatformDeepseek
+	PlatformMiniMax          = domain.PlatformMiniMax
+	PlatformOpenCodeGo       = domain.PlatformOpenCodeGo
+	PlatformTencentCodeBuddy = domain.PlatformTencentCodeBuddy
+	PlatformComposite        = domain.PlatformComposite
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
 	PlatformKiro = "kiro"
@@ -115,6 +116,12 @@ func IsOpenCodeGo(platform string) bool {
 	return platform == PlatformOpenCodeGo
 }
 
+// IsTencentCodeBuddy 报告 platform 是否为腾讯 CodeBuddy / WorkBuddy。
+// 由独立的 TencentCodeBuddyProvider 接入；上游仅提供 OpenAI Chat Completions。
+func IsTencentCodeBuddy(platform string) bool {
+	return platform == PlatformTencentCodeBuddy
+}
+
 // IsMultiProtocolAPIKeyProvider 报告 platform 是否为多协议 API Key 网关
 // （国产供应商 + OpenCode）：走 OpenAI 网关、支持 adaptive 协议分流。
 func IsMultiProtocolAPIKeyProvider(platform string) bool {
@@ -135,6 +142,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformDeepseek,
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
+	PlatformTencentCodeBuddy,
 }
 
 // AllowedSchedulingThresholdPlatforms 是允许设置账号自动停调阈值的平台列表。

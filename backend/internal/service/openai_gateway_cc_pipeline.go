@@ -220,6 +220,11 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 		}
 		applyGrokCacheHeaders(upstreamReq.Header, grokCacheIdentity)
 	}
+	// TencentCodeBuddyProvider：注入 X-User-Id / X-Enterprise-Id / X-Tenant-Id /
+	// X-Domain 身份头（Authorization 已在上方以 Bearer <access_token> 写入）。
+	if account.IsTencentCodeBuddy() {
+		applyTencentCodeBuddyHeaders(upstreamReq.Header, account)
+	}
 	// 账号级请求头覆写：放在所有内置默认头（含 Grok CLI 身份头）之后应用，
 	// 使配置值获得除共享传输层强制头之外的最高优先级。
 	account.ApplyHeaderOverrides(upstreamReq.Header)

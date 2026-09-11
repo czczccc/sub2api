@@ -284,6 +284,79 @@ export function isOpenCodeGoPlatform(platform: string): boolean {
   return platform === 'opencode_go'
 }
 
+// ── Tencent CodeBuddy（中国大陆版） ──────────────────────────────────
+
+/** X-Domain 默认值，与后端 tencentCodeBuddyDomain 保持一致。 */
+export const CODEBUDDY_DEFAULT_DOMAIN = 'www.codebuddy.cn'
+
+export function isCodeBuddyPlatform(platform: string): boolean {
+  return platform === 'codebuddy'
+}
+
+export interface CodeBuddyCredentialInput {
+  accessToken: string
+  refreshToken?: string
+  userID?: string
+  enterpriseID?: string
+  domain?: string
+}
+
+/**
+ * 组装 CodeBuddy 账号凭据。
+ *
+ * 上游 host 与 X-Domain 由后端固定为大陆版（copilot.tencent.com / www.codebuddy.cn），
+ * 前端不提交 base_url；只提交令牌与可选身份字段。product / region 由后端归一化写入，
+ * 并受 DB CHECK 约束保护，前端不参与。
+ *
+ * domain 只在偏离默认值时才提交：把默认值落盘会让它被当成显式配置固化。
+ */
+export function buildCodeBuddyCredentials(input: CodeBuddyCredentialInput): Record<string, unknown> {
+  const credentials: Record<string, unknown> = {
+    access_token: input.accessToken.trim()
+  }
+  const refreshToken = input.refreshToken?.trim()
+  if (refreshToken) credentials.refresh_token = refreshToken
+  const userID = input.userID?.trim()
+  if (userID) credentials.uid = userID
+  const enterpriseID = input.enterpriseID?.trim()
+  if (enterpriseID) credentials.enterprise_id = enterpriseID
+  const domain = input.domain?.trim()
+  if (domain && domain !== CODEBUDDY_DEFAULT_DOMAIN) credentials.domain = domain
+  return credentials
+}
+
+/** 回读 CodeBuddy 凭据中的可选字段（供编辑表单回填）。 */
+export function readCodeBuddyCredentialField(
+  credentials: Record<string, unknown> | undefined | null,
+  key: 'refresh_token' | 'uid' | 'enterprise_id' | 'domain'
+): string {
+  const value = credentials?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+/**
+ * 上游倍率探测（/v1/sub2api/billing）支持的平台，与后端
+ * `service.IsUpstreamBillingProbeIdentity` 保持一致。
+ *
+ * CodeBuddy 没有对应的余额/倍率探测端点：若提交 `upstream_billing_probe_enabled=true`，
+ * 后端会以 `UPSTREAM_BILLING_PROBE_ACCOUNT_INVALID`(400) 直接拒绝创建。
+ * 因此前端既不展示该开关，也不发送该字段。
+ */
+export function supportsUpstreamBillingProbe(platform: string): boolean {
+  return (
+    platform === 'openai' ||
+    platform === 'anthropic' ||
+    platform === 'gemini' ||
+    platform === 'antigravity' ||
+    platform === 'grok' ||
+    platform === 'kimi' ||
+    platform === 'zhipu' ||
+    platform === 'deepseek' ||
+    platform === 'minimax' ||
+    platform === 'opencode_go'
+  )
+}
+
 export const OPENCODE_GO_PROTOCOL_RULES_KEY = 'protocol_rules'
 
 export interface OpenCodeGoProtocolRule {

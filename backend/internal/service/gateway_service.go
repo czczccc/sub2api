@@ -1375,6 +1375,62 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 	return respBytes, nil
 }
 
+// tencentCodeBuddyUpstreamModels 返回 CodeBuddy / WorkBuddy 上游 /models 的模型目录；
+// 上游不可用（无可用账号、缺令牌、网络或接口失败）时返回 nil，由调用方回落到
+// 账号 model_mapping / 静态列表的既有链路。
+//
+// 结果使用**独立的**缓存键做正/负缓存：与 GetAvailableModels 自身的
+// (group, platform) 键隔离，否则账号映射列表会把上游结果顶掉、或反之。
+func (s *GatewayService) tencentCodeBuddyUpstreamModels(ctx context.Context, groupID *int64) []string {
+	if s == nil || s.accountRepo == nil || s.httpUpstream == nil {
+		return nil
+	}
+	cacheKey := modelsListCacheKey(groupID, PlatformTencentCodeBuddy) + "|upstream"
+	if s.modelsListCache != nil {
+		if cached, found := s.modelsListCache.Get(cacheKey); found {
+			models, _ := cached.([]string)
+			return cloneStringSlice(models)
+		}
+	}
+
+	var models []string
+	if account := s.firstSchedulableTencentCodeBuddyAccount(ctx, groupID); account != nil {
+		provider := NewTencentCodeBuddyProvider(s.httpUpstream)
+		if fetched, err := provider.Client().FetchModels(ctx, account); err == nil && len(fetched) > 0 {
+			models = fetched
+		}
+	}
+
+	if s.modelsListCache != nil {
+		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
+		modelsListCacheStoreTotal.Add(1)
+	}
+	return cloneStringSlice(models)
+}
+
+// firstSchedulableTencentCodeBuddyAccount 选出第一个可调度且持令牌的 codebuddy 账号，
+// 仅用于拉取模型目录，不参与任何调度决策。
+func (s *GatewayService) firstSchedulableTencentCodeBuddyAccount(ctx context.Context, groupID *int64) *Account {
+	var (
+		accounts []Account
+		err      error
+	)
+	if groupID != nil {
+		accounts, err = s.accountRepo.ListSchedulableByGroupID(ctx, *groupID)
+	} else {
+		accounts, err = s.accountRepo.ListSchedulable(ctx)
+	}
+	if err != nil {
+		return nil
+	}
+	for i := range accounts {
+		if accounts[i].IsTencentCodeBuddy() && accounts[i].TencentCodeBuddyCredential().HasAccessToken() {
+			return &accounts[i]
+		}
+	}
+	return nil
+}
+
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
 	cacheKey := modelsListCacheKey(groupID, platform)
 	if s.modelsListCache != nil {
@@ -1438,6 +1494,21 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 
 	// If no account has model_mapping, return nil (use default)
 	if !hasAnyMapping {
+		// TencentCodeBuddy：账号没有配置 model_mapping 时等于"允许所有模型"
+		// （见 Account.IsModelServable 的 len(mapping)==0 分支），此时上游实时目录
+		// 才是可调度的真实集合，用它代替静态兜底。
+		//
+		// 注意：**不能**在配置了白名单时也返回上游目录——那会广告出调度会拒绝的
+		// 模型（客户端下拉选得到、发出去 404 model_not_found）。
+		if platform == PlatformTencentCodeBuddy {
+			if upstream := s.tencentCodeBuddyUpstreamModels(ctx, groupID); len(upstream) > 0 {
+				if s.modelsListCache != nil {
+					s.modelsListCache.Set(cacheKey, cloneStringSlice(upstream), s.modelsListCacheTTL)
+					modelsListCacheStoreTotal.Add(1)
+				}
+				return upstream
+			}
+		}
 		if s.modelsListCache != nil {
 			s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
 			modelsListCacheStoreTotal.Add(1)

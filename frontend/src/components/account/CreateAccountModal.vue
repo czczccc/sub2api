@@ -228,6 +228,19 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
+          <button
+            type="button"
+            @click="selectCodeBuddyPlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'codebuddy'
+                ? 'bg-white text-sky-700 shadow-sm dark:bg-dark-600 dark:text-sky-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="codebuddy" size="sm" />
+            CodeBuddy
+          </button>
         </div>
       </div>
 
@@ -530,6 +543,66 @@
             </div>
           </button>
         </div>
+      </div>
+
+      <!-- Tencent CodeBuddy（中国大陆版）：向导式授权获取凭据，不暴露 Base URL -->
+      <div v-if="isCodeBuddyPlatform(form.platform)" class="space-y-4">
+        <CodeBuddyAuthFlow v-model:mode="codeBuddyAuthMode" @authorized="onCodeBuddyAuthorized" />
+
+        <!-- 手工填写（向导的兜底路径） -->
+        <template v-if="codeBuddyAuthMode === 'manual'">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.accessToken') }}</label>
+            <input
+              v-model="codeBuddyAccessToken"
+              type="password"
+              required
+              class="input font-mono"
+              :placeholder="t('admin.accounts.codebuddy.accessTokenPlaceholder')"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.refreshToken') }}</label>
+            <input
+              v-model="codeBuddyRefreshToken"
+              type="password"
+              class="input font-mono"
+              :placeholder="t('admin.accounts.codebuddy.refreshTokenPlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.refreshTokenHint') }}</p>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.codebuddy.userID') }}</label>
+              <input
+                v-model="codeBuddyUserID"
+                type="text"
+                class="input font-mono"
+                :placeholder="t('admin.accounts.codebuddy.optional')"
+              />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.codebuddy.enterpriseID') }}</label>
+              <input
+                v-model="codeBuddyEnterpriseID"
+                type="text"
+                class="input font-mono"
+                :placeholder="t('admin.accounts.codebuddy.optional')"
+              />
+            </div>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.domain') }}</label>
+            <input
+              v-model="codeBuddyDomain"
+              type="text"
+              class="input font-mono"
+              :placeholder="CODEBUDDY_DEFAULT_DOMAIN"
+            />
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.domainHint') }}</p>
+          </div>
+          <p class="input-hint">{{ t('admin.accounts.codebuddy.hint') }}</p>
+        </template>
       </div>
 
       <!-- Account Mode Selection (Kimi / Zhipu / DeepSeek) -->
@@ -1357,8 +1430,11 @@
         </div>
       </div>
 
-      <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
-      <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+      <!-- API Key input (only for apikey type; Antigravity / CodeBuddy have their own fields) -->
+      <div
+        v-if="form.type === 'apikey' && form.platform !== 'antigravity' && form.platform !== 'codebuddy'"
+        class="space-y-4"
+      >
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -3945,13 +4021,17 @@ import {
   applyHeaderOverride,
   applyInterceptWarmup,
   applyOpenCodeGoProtocolRules,
+  buildCodeBuddyCredentials,
   cloneOpenCodeGoProtocolRules,
   cnSupportsNativeResponses,
+  CODEBUDDY_DEFAULT_DOMAIN,
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   defaultOpenCodeProtocolRules,
   isCNProviderPlatform,
+  isCodeBuddyPlatform,
   isHeaderOverrideCapable,
+  supportsUpstreamBillingProbe,
   validateHeaderOverrideRows,
   type CnAccountMode,
   type CnApiProtocol,
@@ -3979,6 +4059,7 @@ import {
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
+import CodeBuddyAuthFlow from './CodeBuddyAuthFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
 // Note: defineExpose automatically unwraps refs, so we use the unwrapped types
@@ -4153,6 +4234,42 @@ const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
+// ── Tencent CodeBuddy（中国大陆版）：只收令牌与可选身份字段，不暴露 Base URL ──
+// authMode=oauth 走设备授权向导（推荐）；authMode=manual 走手工填写兜底。
+const codeBuddyAuthMode = ref<'oauth' | 'manual'>('oauth')
+const codeBuddyAccessToken = ref('')
+const codeBuddyRefreshToken = ref('')
+const codeBuddyUserID = ref('')
+const codeBuddyEnterpriseID = ref('')
+const codeBuddyDomain = ref('')
+
+/** 授权向导成功后把凭据填入表单，复用下方同一条提交路径。 */
+function onCodeBuddyAuthorized(credentials: {
+  access_token: string
+  refresh_token?: string
+  uid?: string
+  enterprise_id?: string
+  domain?: string
+}) {
+  codeBuddyAccessToken.value = credentials.access_token ?? ''
+  codeBuddyRefreshToken.value = credentials.refresh_token ?? ''
+  codeBuddyUserID.value = credentials.uid ?? ''
+  codeBuddyEnterpriseID.value = credentials.enterprise_id ?? ''
+  codeBuddyDomain.value = credentials.domain ?? ''
+}
+
+/**
+ * 是否预填平台默认模型白名单。
+ *
+ * CodeBuddy 的可用模型由订阅实时决定：账号默认不设 model_mapping（= 允许所有模型），
+ * `/v1/models` 直接取上游实时目录。若在这里预填静态表，静态表会落后于上游，把订阅里
+ * 更新的模型（如 deepseek-v4.1-flash）挡在调度之外，而客户端下拉又是从上游目录渲染的
+ * → 用户"选得到、发出去 404 model_not_found"。因此 CodeBuddy 不预填。
+ */
+function shouldPrefillModelWhitelist(platform: string): boolean {
+  return !isCodeBuddyPlatform(platform)
+}
+
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 const accountMode = ref<CnAccountMode>('payg')
 const openCodeAccountMode = ref<OpenCodeAccountMode>('zen')
@@ -4270,6 +4387,22 @@ function selectOpenCodeGoPlatform() {
   apiKeyBaseUrl.value = defaultCNBaseUrl('opencode_go', openCodeAccountMode.value, 'adaptive')
   resetAdaptiveBaseUrls('opencode_go', openCodeAccountMode.value)
   openCodeGoProtocolRules.value = cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules(openCodeAccountMode.value))
+}
+
+function selectCodeBuddyPlatform() {
+  form.platform = 'codebuddy'
+  form.type = 'apikey'
+  accountCategory.value = 'apikey'
+  resetCodeBuddyForm()
+}
+
+function resetCodeBuddyForm() {
+  codeBuddyAuthMode.value = 'oauth'
+  codeBuddyAccessToken.value = ''
+  codeBuddyRefreshToken.value = ''
+  codeBuddyUserID.value = ''
+  codeBuddyEnterpriseID.value = ''
+  codeBuddyDomain.value = ''
 }
 // 账号类型 / 协议变更时同步默认 base url。
 watch(openCodeAccountMode, (mode, previousMode) => {
@@ -4783,7 +4916,9 @@ watch(
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
         .catch(() => { tlsFingerprintProfiles.value = [] })
       // Modal opened - fill related models
-      allowedModels.value = [...getModelsByPlatform(form.platform)]
+      allowedModels.value = shouldPrefillModelWhitelist(form.platform)
+        ? [...getModelsByPlatform(form.platform)]
+        : []
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
@@ -4970,7 +5105,9 @@ watch(
   [modelRestrictionMode, () => form.platform],
   ([newMode]) => {
     if (newMode === 'whitelist') {
-      allowedModels.value = [...getModelsByPlatform(form.platform)]
+      allowedModels.value = shouldPrefillModelWhitelist(form.platform)
+        ? [...getModelsByPlatform(form.platform)]
+        : []
     }
   }
 )
@@ -5314,6 +5451,7 @@ const resetForm = () => {
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  resetCodeBuddyForm()
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
@@ -5757,6 +5895,36 @@ const handleSubmit = async () => {
     return
   }
 
+  // Tencent CodeBuddy（中国大陆版）：只提交令牌与可选身份字段。上游 host 与 X-Domain
+  // 由后端固定，前端不接受 base_url，也不使用通用 API Key（apiKeyValue）字段。
+  if (isCodeBuddyPlatform(form.platform)) {
+    if (!form.name.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
+      return
+    }
+    if (!codeBuddyAccessToken.value.trim()) {
+      appStore.showError(t('admin.accounts.codebuddy.accessTokenRequired'))
+      return
+    }
+    const credentials = buildCodeBuddyCredentials({
+      accessToken: codeBuddyAccessToken.value,
+      refreshToken: codeBuddyRefreshToken.value,
+      userID: codeBuddyUserID.value,
+      enterpriseID: codeBuddyEnterpriseID.value,
+      domain: codeBuddyDomain.value
+    })
+    const codeBuddyModelMapping = buildModelMappingObject(
+      modelRestrictionMode.value,
+      allowedModels.value,
+      modelMappings.value
+    )
+    if (codeBuddyModelMapping) {
+      credentials.model_mapping = codeBuddyModelMapping
+    }
+    await createAccountAndFinish(form.platform, 'apikey', credentials)
+    return
+  }
+
   // For apikey type, create directly
   if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
@@ -6002,7 +6170,9 @@ const createAccountAndFinish = async (
     expires_at: form.expires_at,
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
     // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
-    upstream_billing_probe_enabled: type === 'apikey' ? upstreamBillingAutoProbeEnabled.value : undefined,
+    // CodeBuddy 没有探测端点，后端会以 400 拒绝，因此也不传该开关。
+    upstream_billing_probe_enabled:
+      type === 'apikey' && supportsUpstreamBillingProbe(platform) ? upstreamBillingAutoProbeEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }

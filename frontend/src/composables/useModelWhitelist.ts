@@ -465,6 +465,16 @@ export function getModelsByPlatform(platform: string): string[] {
       'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus',
       'hy4-preview', 'hy3', 'omen-alpha'
     ]
+    case 'codebuddy': return [
+      // 与后端 DefaultTencentCodeBuddyModelIDs() 保持一致（上游实时目录的静态兜底）。
+      // 注意：CodeBuddy 账号默认不预填白名单（= 允许所有模型），这里仅作选择器建议。
+      'auto',
+      'hy4-preview', 'hy3', 'hy3-x',
+      'deepseek-v4.1-flash', 'deepseek-v4-pro',
+      'glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5.1', 'glm-5v-turbo',
+      'kimi-k3-1', 'kimi-k2.7', 'kimi-k2.6',
+      'minimax-m3'
+    ]
     case 'doubao': return doubaoModels
     case 'minimax': return minimaxModels
     case 'baidu': return baiduModels

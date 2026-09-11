@@ -651,6 +651,49 @@ export async function syncUpstreamModelsPreview(params: SyncUpstreamPreviewParam
   return data
 }
 
+// ── CodeBuddy（腾讯）设备授权向导 ─────────────────────────────────────
+//
+// 上游协议：/v2/plugin/auth/state 生成授权链接 → 用户浏览器登录 →
+// /v2/plugin/auth/token?state= 轮询取回 accessToken/refreshToken/uid/enterpriseId。
+// 流程无状态：state 由前端保管并回传，服务端不落会话。
+
+export interface CodeBuddyAuthSession {
+  state: string
+  auth_url: string
+}
+
+export interface CodeBuddyAuthCredentials {
+  access_token: string
+  refresh_token?: string
+  uid?: string
+  enterprise_id?: string
+  domain?: string
+}
+
+export interface CodeBuddyAuthPollResult {
+  /** pending = 用户尚未完成浏览器登录；ready = 凭据已就绪 */
+  status: 'pending' | 'ready'
+  credentials?: CodeBuddyAuthCredentials
+  nickname?: string
+}
+
+/** 生成 CodeBuddy 授权链接（向导第一步）。 */
+export async function startCodeBuddyAuth(): Promise<CodeBuddyAuthSession> {
+  const { data } = await apiClient.post<CodeBuddyAuthSession>('/admin/accounts/codebuddy/auth/state')
+  return data
+}
+
+/**
+ * 轮询 CodeBuddy 授权结果。
+ * 未完成登录时后端返回 200 + status=pending，调用方应继续轮询而不是报错。
+ */
+export async function pollCodeBuddyAuth(state: string): Promise<CodeBuddyAuthPollResult> {
+  const { data } = await apiClient.get<CodeBuddyAuthPollResult>('/admin/accounts/codebuddy/auth/poll', {
+    params: { state }
+  })
+  return data
+}
+
 export interface CRSPreviewAccount {
   crs_account_id: string
   kind: string
@@ -1097,6 +1140,8 @@ export const accountsAPI = {
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,
+  startCodeBuddyAuth,
+  pollCodeBuddyAuth,
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,

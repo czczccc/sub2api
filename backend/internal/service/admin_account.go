@@ -520,6 +520,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	// TencentCodeBuddyProvider：product/region 归一化 + access_token 必填校验。
+	if input.Platform == PlatformTencentCodeBuddy {
+		if err := NormalizeTencentCodeBuddyCredentials(input.Type, input.Credentials); err != nil {
+			return nil, err
+		}
+	}
 	// Never persist ephemeral SSO/password secrets after OAuth conversion.
 	input.Credentials = SanitizeStoredCredentials(input.Platform, input.Credentials)
 
@@ -651,6 +657,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		// Strip SSO/password residue that must never sit next to OAuth tokens.
 		account.Credentials = SanitizeStoredCredentials(account.Platform, account.Credentials)
+	}
+	// TencentCodeBuddy：product/region 归一化 + access_token 必填 + apikey 类型不变量。
+	// 管理后台单账号编辑（PUT /accounts/:id）、批量改凭据（BatchUpdateCredentials 逐个
+	// 调用本方法）、OAuth 凭据应用等编辑路径都汇聚到本方法，与建号路径共用
+	// NormalizeTencentCodeBuddyCredentials 唯一入口。
+	// 触发条件含 input.Type != ""：只改类型（不传凭据）同样会破坏 apikey 不变量。
+	if account.IsTencentCodeBuddy() && (len(input.Credentials) > 0 || input.Type != "") {
+		if err := NormalizeTencentCodeBuddyCredentials(account.Type, account.Credentials); err != nil {
+			return nil, err
+		}
 	}
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
@@ -1077,6 +1093,15 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	// TencentCodeBuddy：批量写是 JSONB 顶层 key 合并（credentials || increment），
+	// 共享增量必须先在"目标账号既有凭据 + 增量"上校验，并把归一化结果写回增量本身，
+	// 否则非法 product/region 会一路写进 DB（被 240 迁移的 CHECK 拒绝成 500）。
+	// 归一化规则仍只有 NormalizeTencentCodeBuddyCredentials 一处。
+	if HasTencentCodeBuddyCredentialKeys(input.Credentials) {
+		if err := normalizeTencentCodeBuddyBulkCredentials(cachedTargets, input.Credentials); err != nil {
+			return nil, err
+		}
+	}
 	// Bulk may mix platforms; always drop ephemeral SSO/password keys (cookie
 	// only when platform is known Grok — empty platform still strips password/*).
 	if input.Credentials != nil {
@@ -1178,6 +1203,34 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	return result, nil
+}
+
+// normalizeTencentCodeBuddyBulkCredentials 校验批量更新的 CodeBuddy 目标，并把归一化
+// 结果写回共享增量。
+//
+// 增量会覆盖目标账号的同名键，因此入口函数对"增量携带的键"给出的归一化结果与目标无关
+// （合法值保持、非法值回落默认），用首个 codebuddy 目标补全并写回一次即可；其余目标用
+// "既有凭据 + 已归一化增量"逐个复核，避免缺 access_token / 类型非 apikey 的不合规账号
+// 被静默写坏（这类账号即便写成功也无法转发）。
+func normalizeTencentCodeBuddyBulkCredentials(targets []*Account, increment map[string]any) error {
+	normalized := false
+	for _, target := range targets {
+		if !target.IsTencentCodeBuddy() {
+			continue
+		}
+		if !normalized {
+			if err := NormalizeTencentCodeBuddyCredentialUpdate(target.Type, increment, target.Credentials); err != nil {
+				return err
+			}
+			normalized = true
+			continue
+		}
+		merged := mergeMap(target.Credentials, increment)
+		if err := NormalizeTencentCodeBuddyCredentials(target.Type, merged); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func updatesUpstreamBillingProbeIdentity(credentials map[string]any) bool {

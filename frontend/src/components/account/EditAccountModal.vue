@@ -28,7 +28,7 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <div v-if="!isCodeBuddyAccount && (!isCNApiKeyAccount || editApiProtocol !== 'adaptive')">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -76,6 +76,51 @@
             {{ t('admin.accounts.cnProviders.apiProtocol.responsesFallbackDesc') }}
           </p>
         </div>
+        <!-- Tencent CodeBuddy（中国大陆版）凭据：不暴露 Base URL -->
+        <template v-if="isCodeBuddyAccount">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.accessToken') }}</label>
+            <input
+              v-model="editCodeBuddyAccessToken"
+              type="password"
+              class="input font-mono"
+              autocomplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              :placeholder="t('admin.accounts.leaveEmptyToKeep')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.accessTokenHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.refreshToken') }}</label>
+            <input
+              v-model="editCodeBuddyRefreshToken"
+              type="password"
+              class="input font-mono"
+              autocomplete="new-password"
+              :placeholder="t('admin.accounts.codebuddy.refreshTokenPlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.refreshTokenHint') }}</p>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.codebuddy.userID') }}</label>
+              <input v-model="editCodeBuddyUserID" type="text" class="input font-mono" :placeholder="t('admin.accounts.codebuddy.optional')" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.codebuddy.enterpriseID') }}</label>
+              <input v-model="editCodeBuddyEnterpriseID" type="text" class="input font-mono" :placeholder="t('admin.accounts.codebuddy.optional')" />
+            </div>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.domain') }}</label>
+            <input v-model="editCodeBuddyDomain" type="text" class="input font-mono" :placeholder="CODEBUDDY_DEFAULT_DOMAIN" />
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.domainHint') }}</p>
+          </div>
+          <p class="input-hint">{{ t('admin.accounts.codebuddy.hint') }}</p>
+        </template>
+
         <!-- OpenCode Zen vs GO -->
         <div v-if="isCNApiKeyAccount && account.platform === 'opencode_go'">
           <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
@@ -204,7 +249,7 @@
           </div>
           <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
         </div>
-        <div>
+        <div v-if="!isCodeBuddyAccount">
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
           <input
             v-model="editApiKey"
@@ -1969,7 +2014,7 @@
       </div>
 
       <div
-        v-if="account?.type === 'apikey'"
+        v-if="account?.type === 'apikey' && supportsUpstreamBillingProbe(account?.platform ?? '')"
         class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div>
@@ -3075,6 +3120,10 @@ import {
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   isCNProviderPlatform,
+  isCodeBuddyPlatform,
+  readCodeBuddyCredentialField,
+  supportsUpstreamBillingProbe,
+  CODEBUDDY_DEFAULT_DOMAIN,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
   HEADER_OVERRIDES_CREDENTIAL_KEY,
   type CnAccountMode,
@@ -3182,6 +3231,14 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+
+// ── Tencent CodeBuddy（中国大陆版）：只编辑令牌与可选身份字段，不暴露 Base URL ──
+const editCodeBuddyAccessToken = ref('')
+const editCodeBuddyRefreshToken = ref('')
+const editCodeBuddyUserID = ref('')
+const editCodeBuddyEnterpriseID = ref('')
+const editCodeBuddyDomain = ref('')
+const isCodeBuddyAccount = computed(() => isCodeBuddyPlatform(props.account?.platform ?? ''))
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）account_mode / api_protocol 编辑 ──
 // account_mode 决定额度/余额监控路径，api_protocol 决定转发端点与格式；
@@ -4261,6 +4318,14 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           parseOpenCodeGoProtocolRules(credentials.protocol_rules) ??
           cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules(editOpenCodeAccountMode.value))
       }
+      if (isCodeBuddyPlatform(newAccount.platform)) {
+        // access_token 已脱敏不回传：留空即沿用旧值。
+        editCodeBuddyAccessToken.value = ''
+        editCodeBuddyRefreshToken.value = readCodeBuddyCredentialField(credentials, 'refresh_token')
+        editCodeBuddyUserID.value = readCodeBuddyCredentialField(credentials, 'uid')
+        editCodeBuddyEnterpriseID.value = readCodeBuddyCredentialField(credentials, 'enterprise_id')
+        editCodeBuddyDomain.value = readCodeBuddyCredentialField(credentials, 'domain')
+      }
     }
     const platformDefaultUrl =
       newAccount.platform === 'openai'
@@ -4366,6 +4431,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  editCodeBuddyAccessToken.value = ''
+  editCodeBuddyRefreshToken.value = ''
+  editCodeBuddyUserID.value = ''
+  editCodeBuddyEnterpriseID.value = ''
+  editCodeBuddyDomain.value = ''
 }
 
 async function loadTLSProfiles() {
@@ -4984,7 +5054,7 @@ const handleSubmit = async () => {
       updatePayload.load_factor = 0
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
-    if (props.account.type === 'apikey') {
+    if (props.account.type === 'apikey' && supportsUpstreamBillingProbe(props.account.platform)) {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
@@ -5002,6 +5072,26 @@ const handleSubmit = async () => {
       const newCredentials: Record<string, unknown> = {
         ...currentCredentials,
         base_url: newBaseUrl
+      }
+
+      // Tencent CodeBuddy（中国大陆版）：上游 host 由后端固定，不接受 base_url；
+      // 只维护令牌与可选身份字段。access_token 脱敏不回传，留空表示沿用旧值。
+      if (isCodeBuddyAccount.value) {
+        delete newCredentials.base_url
+        const accessToken = editCodeBuddyAccessToken.value.trim()
+        if (accessToken) newCredentials.access_token = accessToken
+        const refreshToken = editCodeBuddyRefreshToken.value.trim()
+        if (refreshToken) newCredentials.refresh_token = refreshToken
+        else delete newCredentials.refresh_token
+        const userID = editCodeBuddyUserID.value.trim()
+        if (userID) newCredentials.uid = userID
+        else delete newCredentials.uid
+        const enterpriseID = editCodeBuddyEnterpriseID.value.trim()
+        if (enterpriseID) newCredentials.enterprise_id = enterpriseID
+        else delete newCredentials.enterprise_id
+        const domain = editCodeBuddyDomain.value.trim()
+        if (domain && domain !== CODEBUDDY_DEFAULT_DOMAIN) newCredentials.domain = domain
+        else delete newCredentials.domain
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
@@ -5044,7 +5134,9 @@ const handleSubmit = async () => {
       // 两者都无才报错。
       const hasExistingApiKey =
         props.account.credentials_status?.has_api_key ?? Boolean(currentCredentials.api_key)
-      if (editApiKey.value.trim()) {
+      if (isCodeBuddyAccount.value) {
+        // CodeBuddy 使用 access_token（已在上面处理），不涉及 api_key。
+      } else if (editApiKey.value.trim()) {
         newCredentials.api_key = editApiKey.value.trim()
       } else if (!hasExistingApiKey) {
         appStore.showError(t('admin.accounts.apiKeyIsRequired'))

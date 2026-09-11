@@ -98,6 +98,24 @@ func NewTokenRefreshService(
 	tempUnschedCache TempUnschedCache,
 	grokOAuthServices ...*GrokOAuthService,
 ) *TokenRefreshService {
+	_ = grokOAuthServices
+	return newTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthServices, nil)
+}
+
+// newTokenRefreshService 是构造实现，额外接收 CodeBuddy Provider（可能为 nil）。
+func newTokenRefreshService(
+	accountRepo AccountRepository,
+	oauthService *OAuthService,
+	openaiOAuthService *OpenAIOAuthService,
+	geminiOAuthService *GeminiOAuthService,
+	antigravityOAuthService *AntigravityOAuthService,
+	cacheInvalidator TokenCacheInvalidator,
+	schedulerCache SchedulerCache,
+	cfg *config.Config,
+	tempUnschedCache TempUnschedCache,
+	grokOAuthServices []*GrokOAuthService,
+	tencentCodeBuddyProvider *TencentCodeBuddyProvider,
+) *TokenRefreshService {
 	refreshCfg := &config.TokenRefreshConfig{}
 	if cfg != nil {
 		refreshCfg = &cfg.TokenRefresh
@@ -137,6 +155,15 @@ func NewTokenRefreshService(
 		{platform: PlatformGemini, refresher: geminiRefresher, executor: geminiRefresher},
 		{platform: PlatformAntigravity, refresher: agRefresher, executor: agRefresher},
 		{platform: PlatformGrok, refresher: grokRefresher, executor: grokRefresher},
+	}
+	// TencentCodeBuddyProvider：access_token 为短期令牌，必须纳入后台刷新。
+	if tencentCodeBuddyProvider != nil {
+		codeBuddyRefresher := NewTencentCodeBuddyTokenRefresher(tencentCodeBuddyProvider)
+		s.registrations = append(s.registrations, tokenRefreshRegistration{
+			platform:  PlatformTencentCodeBuddy,
+			refresher: codeBuddyRefresher,
+			executor:  codeBuddyRefresher,
+		})
 	}
 
 	return s

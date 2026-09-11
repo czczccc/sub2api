@@ -9,18 +9,23 @@ import {
   applyInterceptWarmup,
   applyOpenCodeGoProtocolRules,
   applyPlanType,
+  buildCodeBuddyCredentials,
   buildHeaderOverridesObject,
   buildPlanTypeOptions,
   cloneOpenCodeGoProtocolRules,
+  CODEBUDDY_DEFAULT_DOMAIN,
   cnQuotaCellVisible,
   defaultCNBaseUrl,
   defaultOpenCodeProtocolRules,
   isCustomGrokBaseUrl,
   resolveOpenCodeAccountMode,
+  isCodeBuddyPlatform,
   isHeaderOverrideCapable,
   GROK_BASE_URL_PRESETS,
   parseHeaderOverridesJson,
   parseOpenCodeGoProtocolRules,
+  readCodeBuddyCredentialField,
+  supportsUpstreamBillingProbe,
   planTypeDisplayLabel,
   readPlanType,
   serializeHeaderOverrideRows,
@@ -572,5 +577,84 @@ describe('plan_type helpers', () => {
       expect(out).toEqual({ email: 'a@b.c' })
       expect('plan_type' in out).toBe(false)
     })
+  })
+})
+
+// ── Tencent CodeBuddy（中国大陆版）凭据契约 ─────────────────────────
+
+describe('CodeBuddy credentials', () => {
+  it('only submits tokens and identity fields, never base_url or product/region', () => {
+    const credentials = buildCodeBuddyCredentials({
+      accessToken: '  at  ',
+      refreshToken: ' rt ',
+      userID: ' u1 ',
+      enterpriseID: ' e1 ',
+      domain: ''
+    })
+
+    expect(credentials).toEqual({
+      access_token: 'at',
+      refresh_token: 'rt',
+      uid: 'u1',
+      enterprise_id: 'e1'
+    })
+    // 上游 host 由后端固定，前端不得提交 base_url；product/region 由后端归一化。
+    expect(credentials).not.toHaveProperty('base_url')
+    expect(credentials).not.toHaveProperty('product')
+    expect(credentials).not.toHaveProperty('region')
+  })
+
+  it('omits empty optional fields instead of sending blank values', () => {
+    const credentials = buildCodeBuddyCredentials({
+      accessToken: 'at',
+      refreshToken: '',
+      userID: '',
+      enterpriseID: ''
+    })
+
+    expect(credentials).toEqual({ access_token: 'at' })
+  })
+
+  it('persists domain only when it differs from the default', () => {
+    expect(
+      buildCodeBuddyCredentials({ accessToken: 'at', domain: CODEBUDDY_DEFAULT_DOMAIN })
+    ).not.toHaveProperty('domain')
+
+    expect(
+      buildCodeBuddyCredentials({ accessToken: 'at', domain: ' tenant.example.com ' })
+    ).toHaveProperty('domain', 'tenant.example.com')
+  })
+
+  it('only recognizes codebuddy as the platform and reads back optional fields', () => {
+    expect(isCodeBuddyPlatform('codebuddy')).toBe(true)
+    expect(isCodeBuddyPlatform('opencode_go')).toBe(false)
+
+    expect(readCodeBuddyCredentialField({ uid: 'u1', domain: 42 }, 'uid')).toBe('u1')
+    expect(readCodeBuddyCredentialField({ domain: 42 }, 'domain')).toBe('')
+    expect(readCodeBuddyCredentialField(undefined, 'refresh_token')).toBe('')
+  })
+})
+
+describe('supportsUpstreamBillingProbe', () => {
+  it('覆盖全部可探测平台，但不含 CodeBuddy', () => {
+    for (const platform of [
+      'openai',
+      'anthropic',
+      'gemini',
+      'antigravity',
+      'grok',
+      'kimi',
+      'zhipu',
+      'deepseek',
+      'minimax',
+      'opencode_go'
+    ]) {
+      expect(supportsUpstreamBillingProbe(platform), platform).toBe(true)
+    }
+    // CodeBuddy 没有探测端点：提交 upstream_billing_probe_enabled=true 会被后端
+    // 以 UPSTREAM_BILLING_PROBE_ACCOUNT_INVALID(400) 拒绝，因此必须为 false。
+    expect(supportsUpstreamBillingProbe('codebuddy')).toBe(false)
+    expect(supportsUpstreamBillingProbe('composite')).toBe(false)
+    expect(supportsUpstreamBillingProbe('')).toBe(false)
   })
 })
