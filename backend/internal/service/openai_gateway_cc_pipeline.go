@@ -182,6 +182,12 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	// TencentCodeBuddy：腾讯私有上游对请求体有额外约束，必须先归一化再发出。
+	// 放在这个函数里是因为四条 CC 回退路径最终都经过它。
+	if account.IsTencentCodeBuddy() {
+		body = normalizeTencentCodeBuddyUpstreamPayload(body)
+	}
+
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
 	releaseUpstreamCtx()
