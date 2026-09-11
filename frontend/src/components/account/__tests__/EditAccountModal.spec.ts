@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent } from 'vue'
+import { defineComponent, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 
 const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
@@ -138,6 +138,64 @@ const GroupSelectorStub = defineComponent({
       </button>
     </div>
   `
+})
+
+function buildCodeBuddyAccount() {
+  return {
+    id: 4,
+    name: '123',
+    notes: null,
+    platform: 'codebuddy',
+    type: 'apikey',
+    credentials: {
+      domain: 'copilot.tencent.com',
+      enterprise_id: 'ent-42',
+      product: 'codebuddy',
+      region: 'china',
+      uid: 'cb-user-1'
+    },
+    credentials_status: { has_access_token: true, has_refresh_token: true },
+    extra: {},
+    proxy_id: null,
+    concurrency: 10,
+    priority: 1,
+    rate_multiplier: 1,
+    status: 'active',
+    group_ids: [],
+    expires_at: null,
+    auto_pause_on_expired: true
+  } as any
+}
+
+describe('EditAccountModal / Tencent CodeBuddy', () => {
+  beforeEach(() => {
+    authIsSimpleMode.value = true
+  })
+
+  it('回填账号级身份字段（uid / enterprise_id / domain）', async () => {
+    const wrapper = mountModal(buildCodeBuddyAccount())
+    await nextTick()
+
+    const optionalInputs = wrapper.findAll<HTMLInputElement>('input[placeholder="admin.accounts.codebuddy.optional"]')
+    expect(optionalInputs).toHaveLength(2)
+    expect(optionalInputs[0]!.element.value).toBe('cb-user-1')
+    expect(optionalInputs[1]!.element.value).toBe('ent-42')
+
+    const domainInput = wrapper.get<HTMLInputElement>('input[placeholder="www.codebuddy.cn"]')
+    expect(domainInput.element.value).toBe('copilot.tencent.com')
+
+    wrapper.unmount()
+  })
+
+  it('不渲染国产供应商的 adaptive 端点块（Base URL 由后端固定）', async () => {
+    const wrapper = mountModal(buildCodeBuddyAccount())
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('admin.accounts.cnProviders.apiProtocol.endpoints')
+    expect(wrapper.find('input[placeholder="https://api.anthropic.com"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })
 
 function buildAccount() {

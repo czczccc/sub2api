@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 )
 
@@ -733,6 +734,14 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 		return nil, nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
 	}
 
+	// 腾讯 CodeBuddy 的模型目录不在 OpenAI 兼容的 {base}/v1/models 上（挂在
+	// copilot.tencent.com 根路径，且必须带产品身份头），因此不走
+	// buildUpstreamModelsRequest 的通用分支。
+	if account.IsTencentCodeBuddy() {
+		models, err := s.fetchTencentCodeBuddyUpstreamModels(ctx, account)
+		return models, nil, err
+	}
+
 	req, err := s.buildUpstreamModelsRequest(ctx, account)
 	if err != nil {
 		return nil, nil, err
@@ -1180,6 +1189,67 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 		models = append(models, strings.TrimSpace(modelID))
 	}
 	return dedupeAndSortModelIDs(models), nil
+}
+
+// fetchTencentCodeBuddyUpstreamModels 通过 CodeBuddy 专用客户端读取上游实时模型目录。
+//
+// 与其它平台的区别：目录 endpoint 固定在 host 根路径（/console/enterprises/personal/models），
+// 并且必须携带产品身份头（X-Domain / X-User-Id / X-Enterprise-Id）——两者都由
+// TencentCodeBuddyClient 统一封装，这里只做错误分类与去重排序。
+//
+// access_token 过期时上游会拒绝请求（401/403）。管理员手动同步是一次只读动作，
+// 因此这里带 refresh_token 就地换一次新令牌后重试，但不写回账号——落盘仍由网关的
+// token refresher 独占，避免两条写入路径互相覆盖。
+func (s *AccountTestService) fetchTencentCodeBuddyUpstreamModels(ctx context.Context, account *Account) ([]string, error) {
+	cred := account.TencentCodeBuddyCredential()
+	if !cred.HasAccessToken() {
+		return nil, newUpstreamModelSyncConfigError("No CodeBuddy access token is available", nil)
+	}
+
+	client := NewTencentCodeBuddyClient(s.httpUpstream)
+	models, status, err := client.fetchModels(ctx, account)
+	if err != nil && cred.RefreshToken != "" && tencentCodeBuddyTokenExpiredStatus(status) {
+		refreshed, refreshErr := client.RefreshToken(ctx, account)
+		if refreshErr != nil {
+			return nil, newUpstreamModelSyncErrorFromTencentCodeBuddy(refreshErr)
+		}
+		retry := *account
+		retry.Credentials = refreshed.Apply(account.Credentials)
+		models, status, err = client.fetchModels(ctx, &retry)
+	}
+	if err != nil {
+		return nil, newUpstreamModelSyncErrorFromTencentCodeBuddy(err)
+	}
+	if len(models) == 0 {
+		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
+	}
+	return dedupeAndSortModelIDs(models), nil
+}
+
+// tencentCodeBuddyTokenExpiredStatus 报告上游状态码是否表示访问令牌失效。
+func tencentCodeBuddyTokenExpiredStatus(status int) bool {
+	return status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+// newUpstreamModelSyncErrorFromTencentCodeBuddy 把 CodeBuddy 客户端返回的
+// infraerrors.ApplicationError 映射为上游同步错误：4xx 属于账号/请求配置问题，
+// 其余（含 5xx 与网络错误）按上游故障处理，并保留 HTTP 状态码，使
+// upstreamModelListEndpointUnsupported 的 404/405 回退逻辑仍然生效。
+func newUpstreamModelSyncErrorFromTencentCodeBuddy(err error) error {
+	var appErr *infraerrors.ApplicationError
+	if errors.As(err, &appErr) {
+		if appErr.Code == http.StatusBadRequest || appErr.Code == http.StatusUnauthorized ||
+			appErr.Code == http.StatusForbidden {
+			return newUpstreamModelSyncConfigError(appErr.Message, err)
+		}
+		return &UpstreamModelSyncError{
+			Kind:       UpstreamModelSyncErrorUpstream,
+			Message:    appErr.Message,
+			StatusCode: int(appErr.Code),
+			Err:        err,
+		}
+	}
+	return newUpstreamModelSyncUpstreamError("Failed to fetch CodeBuddy model list", err)
 }
 
 func (s *AccountTestService) doUpstreamModelsRequest(req *http.Request, proxyURL string, account *Account) (*http.Response, error) {

@@ -180,28 +180,35 @@ func (c *TencentCodeBuddyClient) ChatCompletion(ctx context.Context, account *Ac
 // FetchModels 调用官方模型目录接口 {base}/models，返回模型 ID 列表。
 // 返回空列表且 err == nil 表示上游可用但未给出模型——由调用方决定是否兜底。
 func (c *TencentCodeBuddyClient) FetchModels(ctx context.Context, account *Account) ([]string, error) {
+	models, _, err := c.fetchModels(ctx, account)
+	return models, err
+}
+
+// fetchModels 是 FetchModels 的状态码感知版本：额外返回上游 HTTP 状态码（出错时
+// 为 0），供需要区分"令牌失效(401/403)"与"上游故障"的调用方使用。
+func (c *TencentCodeBuddyClient) fetchModels(ctx context.Context, account *Account) ([]string, int, error) {
 	if err := c.requireAccount(account); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	cred := account.TencentCodeBuddyCredential()
 	if !cred.HasAccessToken() {
-		return nil, infraerrors.New(http.StatusBadRequest, "TENCENT_CODEBUDDY_MISSING_ACCESS_TOKEN",
+		return nil, 0, infraerrors.New(http.StatusBadRequest, "TENCENT_CODEBUDDY_MISSING_ACCESS_TOKEN",
 			"credentials.access_token is required")
 	}
 	// 模型目录挂在 host 根，不在 /v2 下。
 	url := strings.TrimRight(tencentCodeBuddyAPIHost, "/") + tencentCodeBuddyModelsPath
 	resp, err := c.do(ctx, account, cred, http.MethodGet, url, nil, false, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, tencentCodeBuddyMaxModelsBody))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, infraerrors.Newf(http.StatusBadGateway, "TENCENT_CODEBUDDY_MODELS_HTTP_ERROR",
+		return nil, resp.StatusCode, infraerrors.Newf(http.StatusBadGateway, "TENCENT_CODEBUDDY_MODELS_HTTP_ERROR",
 			"fetch models failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return parseTencentCodeBuddyModelIDs(body), nil
+	return parseTencentCodeBuddyModelIDs(body), resp.StatusCode, nil
 }
 
 // RefreshToken 调用官方刷新接口换取新的 access_token。

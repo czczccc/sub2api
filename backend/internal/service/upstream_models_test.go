@@ -1185,3 +1185,152 @@ func TestMatchModelsDevProviderOfficialHostsWithoutAPI(t *testing.T) {
 	}}
 	require.False(t, upstreamCatalogNeedsRegistry(capabilitySyncModelIDs([]string{"gpt-6-astra", "gpt-image-2"}), metadata))
 }
+
+// Scenario: CodeBuddy 的模型目录不在 OpenAI 兼容的 /v1/models 上。同步必须走
+// 专用客户端：host 根路径 + 产品身份头，并过滤上游标记 disabled 的模型。
+func TestFetchUpstreamSupportedModelsUsesCodeBuddyDedicatedEndpoint(t *testing.T) {
+	t.Parallel()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"code": 0,
+			"data": {
+				"models": [
+					{"id": "hy3", "disabled": false},
+					{"id": "glm-5.3", "disabled": false},
+					{"id": "retired-model", "disabled": true}
+				],
+				"agents": [{"name": "cli", "models": ["glm-5.3", "hy3", "kimi-k3-1", "retired-model"]}]
+			}
+		}`)),
+	}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:       7,
+		Platform: PlatformTencentCodeBuddy,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"access_token": "cb-access-token",
+			"uid":          "cb-user-1",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"glm-5.3", "hy3", "kimi-k3-1"}, models)
+
+	require.Len(t, upstream.requests, 1)
+	req := upstream.requests[0]
+	require.Equal(t, "https://copilot.tencent.com/console/enterprises/personal/models", req.URL.String())
+	require.Equal(t, http.MethodGet, req.Method)
+	require.Equal(t, "Bearer cb-access-token", req.Header.Get("Authorization"))
+	require.Equal(t, "www.codebuddy.cn", req.Header.Get("X-Domain"))
+	require.Equal(t, "cb-user-1", req.Header.Get("X-User-Id"))
+}
+
+// Scenario: 缺少 access_token 属于账号配置问题，必须以 400 语义返回，
+// 而不是被当作上游故障。
+func TestFetchUpstreamSupportedModelsCodeBuddyRequiresAccessToken(t *testing.T) {
+	t.Parallel()
+
+	upstream := &httpUpstreamRecorder{}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	_, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:          8,
+		Platform:    PlatformTencentCodeBuddy,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"refresh_token": "only-refresh"},
+	})
+	require.Error(t, err)
+
+	var syncErr *UpstreamModelSyncError
+	require.True(t, errors.As(err, &syncErr))
+	require.Equal(t, UpstreamModelSyncErrorConfiguration, syncErr.Kind)
+	require.Empty(t, upstream.requests)
+}
+
+// Scenario: 上游 5xx 保留状态码，交给 handler 映射为 Bad Gateway。
+func TestFetchUpstreamSupportedModelsCodeBuddyUpstreamFailure(t *testing.T) {
+	t.Parallel()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"code":500,"msg":"boom"}`)),
+	}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	_, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID:          9,
+		Platform:    PlatformTencentCodeBuddy,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"access_token": "cb-access-token"},
+	})
+	require.Error(t, err)
+
+	var syncErr *UpstreamModelSyncError
+	require.True(t, errors.As(err, &syncErr))
+	require.Equal(t, UpstreamModelSyncErrorUpstream, syncErr.Kind)
+	require.Equal(t, http.StatusBadGateway, syncErr.StatusCode)
+}
+
+// Scenario: access_token 过期（上游 401）时，管理员同步会用 refresh_token
+// 就地换一次新令牌并重试；账号凭据本身不被写回（落盘由网关 refresher 独占）。
+func TestFetchUpstreamSupportedModelsCodeBuddyRefreshesExpiredToken(t *testing.T) {
+	t.Parallel()
+
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"code":401,"msg":"token expired"}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"code":0,"msg":"ok","data":{"accessToken":"cb-fresh-token","refreshToken":"cb-refresh-2"}}`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"code":0,"data":{"agents":[{"name":"cli","models":["hy3"]}]}}`)),
+		},
+	}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+	account := &Account{
+		ID:       10,
+		Platform: PlatformTencentCodeBuddy,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"access_token":  "cb-stale-token",
+			"refresh_token": "cb-refresh-1",
+		},
+	}
+
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, []string{"hy3"}, models)
+
+	require.Len(t, upstream.requests, 3)
+	require.Equal(t, tencentCodeBuddyAPIRoot+tencentCodeBuddyTokenRefreshPath, upstream.requests[1].URL.String())
+	require.Equal(t, "cb-refresh-1", upstream.requests[1].Header.Get("X-Refresh-Token"))
+	require.Equal(t, "Bearer cb-fresh-token", upstream.requests[2].Header.Get("Authorization"))
+
+	// 只读同步不得改写账号凭据：原始 map 必须保持旧令牌。
+	require.Equal(t, "cb-stale-token", account.Credentials["access_token"])
+	require.Equal(t, "cb-refresh-1", account.Credentials["refresh_token"])
+}

@@ -62,7 +62,7 @@
             @select="onCnPresetSelect"
           />
         </div>
-        <div v-else>
+        <div v-else-if="!isCodeBuddyAccount">
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
             <div v-for="item in editAdaptiveProtocolOptions" :key="item.value">
@@ -4318,14 +4318,17 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           parseOpenCodeGoProtocolRules(credentials.protocol_rules) ??
           cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules(editOpenCodeAccountMode.value))
       }
-      if (isCodeBuddyPlatform(newAccount.platform)) {
-        // access_token 已脱敏不回传：留空即沿用旧值。
-        editCodeBuddyAccessToken.value = ''
-        editCodeBuddyRefreshToken.value = readCodeBuddyCredentialField(credentials, 'refresh_token')
-        editCodeBuddyUserID.value = readCodeBuddyCredentialField(credentials, 'uid')
-        editCodeBuddyEnterpriseID.value = readCodeBuddyCredentialField(credentials, 'enterprise_id')
-        editCodeBuddyDomain.value = readCodeBuddyCredentialField(credentials, 'domain')
-      }
+    }
+    // Tencent CodeBuddy（中国大陆版）：回填非敏感的身份字段。
+    // 必须留在 isCNProviderPlatform 分支之外——CodeBuddy 不是国产供应商平台，
+    // 放进那个分支会让回填永远不执行（编辑弹窗看似"空表单"）。
+    if (isCodeBuddyPlatform(newAccount.platform)) {
+      // access_token 已脱敏不回传：留空即沿用旧值。
+      editCodeBuddyAccessToken.value = ''
+      editCodeBuddyRefreshToken.value = readCodeBuddyCredentialField(credentials, 'refresh_token')
+      editCodeBuddyUserID.value = readCodeBuddyCredentialField(credentials, 'uid')
+      editCodeBuddyEnterpriseID.value = readCodeBuddyCredentialField(credentials, 'enterprise_id')
+      editCodeBuddyDomain.value = readCodeBuddyCredentialField(credentials, 'domain')
     }
     const platformDefaultUrl =
       newAccount.platform === 'openai'
@@ -4431,11 +4434,16 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
-  editCodeBuddyAccessToken.value = ''
-  editCodeBuddyRefreshToken.value = ''
-  editCodeBuddyUserID.value = ''
-  editCodeBuddyEnterpriseID.value = ''
-  editCodeBuddyDomain.value = ''
+  // CodeBuddy 的身份字段（uid / enterprise_id / domain）由上面 isCodeBuddyPlatform 分支
+  // 回填，这里不能再无条件清空——否则刚填好的值会被就地抹掉（编辑弹窗看似"啥也没有"）。
+  // 只在切换到非 CodeBuddy 账号时清理上一个账号的残留。
+  if (!isCodeBuddyPlatform(newAccount.platform)) {
+    editCodeBuddyAccessToken.value = ''
+    editCodeBuddyRefreshToken.value = ''
+    editCodeBuddyUserID.value = ''
+    editCodeBuddyEnterpriseID.value = ''
+    editCodeBuddyDomain.value = ''
+  }
 }
 
 async function loadTLSProfiles() {
