@@ -60,15 +60,24 @@ func effectiveAPIKeyPlatform(c *gin.Context, apiKey *service.APIKey) string {
 	return apiKey.Group.Platform
 }
 
+// openAIReasoningEffortPolicyForRequest 解析 OpenAI 形状入站请求（/v1/chat/completions
+// 与 /v1/responses）要施加的组级推理档位策略。
+//
+// 除 Anthropic / OpenAI / composite 分组外，CodeBuddy 分组也必须纳入：它的上游是
+// OpenAI 兼容的 chat/completions，客户端用 reasoning_effort 直接控制档位（实测被
+// 上游识别）。若不纳入，组级 MaxReasoningEffort / ReasoningEffortMappings 只对
+// /v1/messages 生效，用 CC 或 Responses 协议的客户端可以绕过上限。
 func openAIReasoningEffortPolicyForRequest(c *gin.Context, apiKey *service.APIKey) (string, []service.ReasoningEffortMapping, string, bool) {
 	if apiKey == nil || apiKey.Group == nil {
 		return "", nil, "", false
 	}
-	if apiKey.Group.Platform != service.PlatformAnthropic && apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite {
+	if apiKey.Group.Platform != service.PlatformAnthropic && apiKey.Group.Platform != service.PlatformOpenAI &&
+		apiKey.Group.Platform != service.PlatformComposite && apiKey.Group.Platform != service.PlatformTencentCodeBuddy {
 		return "", nil, "", false
 	}
 	effectivePlatform := effectiveAPIKeyPlatform(c, apiKey)
-	if effectivePlatform != service.PlatformAnthropic && effectivePlatform != service.PlatformOpenAI {
+	if effectivePlatform != service.PlatformAnthropic && effectivePlatform != service.PlatformOpenAI &&
+		effectivePlatform != service.PlatformTencentCodeBuddy {
 		return "", nil, "", false
 	}
 	maxEffort, mappings := apiKey.Group.MaxReasoningEffort, apiKey.Group.ReasoningEffortMappings

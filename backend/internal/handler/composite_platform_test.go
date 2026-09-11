@@ -269,3 +269,47 @@ func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {
 	require.Equal(t, "public-alias", fields.ChannelMappedModel)
 	require.Equal(t, "public-alias\u2192gpt-5", fields.ModelMappingChain)
 }
+
+// CodeBuddy 分组的客户端用 reasoning_effort（CC / Responses 形状）控制档位，
+// 组级上限必须同样生效，否则这两条协议可以绕过 MaxReasoningEffort。
+func TestOpenAIReasoningEffortPolicyForCodeBuddyGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	apiKey := &service.APIKey{Group: &service.Group{
+		Platform:           service.PlatformTencentCodeBuddy,
+		MaxReasoningEffort: "medium",
+	}}
+	body := []byte(`{"model":"glm-5.3","reasoning_effort":"high"}`)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	got, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "medium", gjson.GetBytes(got, "reasoning_effort").String())
+
+	requested := service.RequestedReasoningEffortFromContext(c.Request.Context())
+	require.NotNil(t, requested)
+	require.Equal(t, "high", *requested)
+
+	// 显式超限 + deny：CC 形状也要按组策略拒绝。
+	denyGroup := *apiKey.Group
+	denyGroup.MaxReasoningEffortOverLimit = service.ReasoningEffortOverLimitDeny
+	denyKey := &service.APIKey{Group: &denyGroup}
+	denyCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	denyCtx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	_, _, err = applyOpenAIReasoningEffortPolicyForRequest(denyCtx, denyKey, body)
+	require.Error(t, err)
+	var overLimit *service.ReasoningEffortOverLimitError
+	require.ErrorAs(t, err, &overLimit)
+
+	// 其它平台分组不受影响：grok 依旧不绑定该策略。
+	grokCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	grokCtx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	grokCtx.Request = grokCtx.Request.WithContext(
+		service.WithResolvedTargetPlatform(grokCtx.Request.Context(), service.PlatformGrok))
+	untouched, changed, err := applyOpenAIReasoningEffortPolicyForRequest(grokCtx, apiKey, body)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, body, untouched)
+}
