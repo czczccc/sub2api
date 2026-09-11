@@ -242,7 +242,10 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	capabilityIDs := capabilitySyncModelIDs(enrichIDs)
 
 	source := "upstream"
-	if upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {
+	// 该平台的能力元数据是否可能补齐（见 upstreamModelCapabilityMetadataApplicable）。
+	// 不可能时既不做 models.dev 注册表查询，也不报告能力缺失。
+	capabilityApplicable := upstreamModelCapabilityMetadataApplicable(account)
+	if capabilityApplicable && upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {
 		if registryMetadata, registryErr := s.fetchModelsDevMetadata(ctx, account, enrichIDs); registryErr == nil {
 			for modelID, fallback := range registryMetadata {
 				current := catalog.Metadata[modelID]
@@ -301,7 +304,7 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 		persistedCapabilities = true
 	}
 
-	if upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {
+	if capabilityApplicable && upstreamCatalogNeedsRegistry(capabilityIDs, catalog.Metadata) {
 		if persistedCapabilities {
 			catalog.Warnings = append(catalog.Warnings, UpstreamModelSyncWarning{
 				Code:    UpstreamModelMetadataPartialCode,
@@ -315,6 +318,19 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 		}
 	}
 	return catalog, nil
+}
+
+// upstreamModelCapabilityMetadataApplicable 报告该账号的模型能力元数据是否
+// 值得补齐 / 值得向管理员报告缺失。
+//
+// 腾讯 CodeBuddy 两个能力来源都拿不到：目录响应只有 {id, disabled} 与 agent 的
+// 模型清单，没有上下文窗口等字段；账号也不存 base_url（host 由后端固定），
+// models.dev 按 base_url 匹配供应商必然落空，且 hy3 / glm-5.3 / kimi-k3-1 这类
+// ID 是腾讯内部别名，注册表里也没有。这份元数据只被 Codex 目录渲染消费，而
+// CodeBuddy 走普通 chat/completions 兼容转发，用不到它——报告"能力不完整"只会
+// 让管理员把一次成功的 ID 同步误读成失败，因此对该平台跳过注册表查询与警告。
+func upstreamModelCapabilityMetadataApplicable(account *Account) bool {
+	return !account.IsTencentCodeBuddy()
 }
 
 func upstreamModelSyncStatusCode(err error) int {

@@ -1334,3 +1334,41 @@ func TestFetchUpstreamSupportedModelsCodeBuddyRefreshesExpiredToken(t *testing.T
 	require.Equal(t, "cb-stale-token", account.Credentials["access_token"])
 	require.Equal(t, "cb-refresh-1", account.Credentials["refresh_token"])
 }
+
+// Scenario: CodeBuddy 的模型能力元数据注定补不齐（上游不返回能力字段、账号无
+// base_url 可匹配 models.dev）。此时不应查询注册表，也不应向管理员报告"能力不完整"，
+// 否则一次成功的 ID 同步会被误读成失败。
+func TestSyncUpstreamModelCatalogSkipsCapabilityWarningForCodeBuddy(t *testing.T) {
+	t.Parallel()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"code":0,"data":{"agents":[{"name":"cli","models":["hy3","glm-5.3"]}]}}`)),
+	}}
+	repo := &upstreamModelMetadataRepoStub{}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          upstreamModelSyncTestConfig(),
+	}
+
+	catalog, err := svc.SyncUpstreamModelCatalog(context.Background(), &Account{
+		ID:       11,
+		Platform: PlatformTencentCodeBuddy,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"access_token": "cb-access-token",
+			"uid":          "cb-user-1",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"glm-5.3", "hy3"}, catalog.Models)
+	require.Empty(t, catalog.Warnings)
+	// 只有一次上游请求：没有额外的 models.dev 注册表查询。
+	require.Len(t, upstream.requests, 1)
+	require.NotEqual(t, modelsDevRegistryURL, upstream.requests[0].URL.String())
+	// 能力不完整时不落盘快照（与既有语义一致）。
+	require.Empty(t, repo.updates)
+}
