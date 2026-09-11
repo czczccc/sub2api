@@ -310,7 +310,23 @@ func extractUpstreamErrorMessage(body []byte) string {
 	}
 
 	// 兜底：尝试顶层 message
-	return gjson.GetBytes(body, "message").String()
+	if message := gjson.GetBytes(body, "message").String(); message != "" {
+		return message
+	}
+
+	// 腾讯 CodeBuddy / WorkBuddy 封套：{"code":11101,"msg":"...","data":...}
+	//
+	// 这个封套既没有 error.message 也没有 message，若不识别就只能回落到
+	// "Upstream error: <status>"，把 11101（不支持非流式）、11128（非法调用渠道）
+	// 这类唯一能定位原因的业务码全部丢掉。业务码随消息一起返回，便于排障。
+	if msg := strings.TrimSpace(gjson.GetBytes(body, "msg").String()); msg != "" {
+		if code := gjson.GetBytes(body, "code"); code.Exists() && code.Type == gjson.Number {
+			return fmt.Sprintf("%s (code %d)", msg, code.Int())
+		}
+		return msg
+	}
+
+	return ""
 }
 
 func extractUpstreamErrorCode(body []byte) string {

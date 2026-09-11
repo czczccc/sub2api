@@ -10,6 +10,7 @@ export default {
         users: 'Users',
         gateway: 'Gateway',
         email: 'Email',
+        modelCapabilities: 'Model capabilities',
         backup: 'Backup',
         payment: 'Payment',
       },

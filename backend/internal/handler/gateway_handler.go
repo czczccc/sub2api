@@ -1160,6 +1160,21 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+
+	// CodeBuddy 需要输出能力字段（输入模态 / 上下文窗口），因此单独走一条 writer；
+	// 白名单过滤与默认列表回落的语义与其它平台保持一致。
+	if platform == service.PlatformTencentCodeBuddy {
+		source := availableModels
+		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
+			source = modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
+			source = apiKey.Group.ModelAllowlist.FilterForListing(source)
+		} else if len(source) == 0 {
+			source = defaultModelIDsForPlatform(platform)
+		}
+		writeCodeBuddyModelsList(c, source, h.codeBuddyModelCapabilityResolver(c, platform))
+		return
+	}
+
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
 		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
@@ -1333,6 +1348,81 @@ type grokModelListItem struct {
 	SupportsReasoningEffort bool                        `json:"supportsReasoningEffort,omitempty"`
 	ReasoningEffort         string                      `json:"reasoningEffort,omitempty"`
 	ReasoningEfforts        []grokReasoningEffortOption `json:"reasoningEfforts,omitempty"`
+}
+
+// codeBuddyModelCapabilityResolver 返回查询"模型能力覆盖"配置的闭包。
+// settingService 缺失（裁剪部署/测试）时返回 nil，writer 会回落到平台默认模态。
+func (h *GatewayHandler) codeBuddyModelCapabilityResolver(
+	c *gin.Context,
+	platform string,
+) func(modelID string) (service.ModelCapabilityEntry, bool) {
+	if h == nil || h.settingService == nil {
+		return nil
+	}
+	ctx := c.Request.Context()
+	return func(modelID string) (service.ModelCapabilityEntry, bool) {
+		return h.settingService.ResolveModelCapability(ctx, platform, modelID)
+	}
+}
+
+// codeBuddyModelArchitecture 是 OpenRouter 风格的能力描述块。同时输出扁平
+// input_modalities 与 architecture.input_modalities：前者是 Codex manifest 与
+// 多数客户端认的字段，后者兼容按 OpenRouter 模型元数据解析的客户端。
+type codeBuddyModelArchitecture struct {
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
+}
+
+type codeBuddyModelListItem struct {
+	claude.Model
+	InputModalities []string                    `json:"input_modalities,omitempty"`
+	Architecture    *codeBuddyModelArchitecture `json:"architecture,omitempty"`
+	ContextWindow   int64                       `json:"context_window,omitempty"`
+	MaxOutputTokens int64                       `json:"max_output_tokens,omitempty"`
+}
+
+// codeBuddyModelCreatedAt 与其它非 OpenAI 平台的占位时间保持一致。
+const codeBuddyModelCreatedAt = "2024-01-01T00:00:00Z"
+
+// writeCodeBuddyModelsList 输出 CodeBuddy 模型目录并附上能力声明。
+//
+// 为什么需要专门的 writer：非 openai/grok 平台默认复用 claude.Model，只有
+// id/type/display_name/created_at 四个字段，客户端读不到任何能力信息，于是
+// 就算上游支持图片也不会把图片发出来。能力值优先取管理员在
+// 「模型能力覆盖」里配置的条目，未配置时输入模态回落到平台默认值，
+// 上下文窗口/输出上限则留空（不猜数字）。
+func writeCodeBuddyModelsList(
+	c *gin.Context,
+	modelIDs []string,
+	resolve func(modelID string) (service.ModelCapabilityEntry, bool),
+) {
+	models := make([]codeBuddyModelListItem, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		item := codeBuddyModelListItem{
+			Model: claude.Model{
+				ID:          modelID,
+				Type:        "model",
+				DisplayName: modelID,
+				CreatedAt:   codeBuddyModelCreatedAt,
+			},
+			InputModalities: append([]string(nil), service.CodeBuddyDefaultInputModalities()...),
+		}
+		if resolve != nil {
+			if entry, ok := resolve(modelID); ok {
+				if len(entry.InputModalities) > 0 {
+					item.InputModalities = entry.InputModalities
+				}
+				item.ContextWindow = entry.ContextWindow
+				item.MaxOutputTokens = entry.MaxOutputTokens
+			}
+		}
+		item.Architecture = &codeBuddyModelArchitecture{
+			InputModalities:  item.InputModalities,
+			OutputModalities: []string{"text"},
+		}
+		models = append(models, item)
+	}
+	writeModelsListResponse(c, models)
 }
 
 func writeGrokModelsList(c *gin.Context, modelIDs []string) {

@@ -98,6 +98,35 @@ func (h *SettingHandler) SetStepUpDeps(totpService *service.TotpService, userSer
 	h.userService = userService
 }
 
+// GetModelCapabilities 返回后台可编辑的"模型能力覆盖"配置。
+//
+// GET /api/v1/admin/settings/model-capabilities
+//
+// 用途：部分上游（如腾讯 CodeBuddy 私有目录接口）不返回上下文窗口/输入模态等
+// 能力字段，公共注册表也匹配不到，只能由管理员手工声明；声明只影响对外广告，
+// 不改变转发行为。
+func (h *SettingHandler) GetModelCapabilities(c *gin.Context) {
+	config := h.settingService.GetModelCapabilityConfig(c.Request.Context())
+	response.Success(c, config)
+}
+
+// UpdateModelCapabilities 覆盖保存模型能力配置。
+//
+// PUT /api/v1/admin/settings/model-capabilities
+func (h *SettingHandler) UpdateModelCapabilities(c *gin.Context) {
+	var req service.ModelCapabilityConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	normalized, err := h.settingService.UpdateModelCapabilityConfig(c.Request.Context(), req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, normalized)
+}
+
 // GetSettings 获取所有系统设置
 // GET /api/v1/admin/settings
 func (h *SettingHandler) GetSettings(c *gin.Context) {

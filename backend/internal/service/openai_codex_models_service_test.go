@@ -3698,3 +3698,150 @@ func TestFetchCodexModelsManifestOAuthSharedAcrossGroupsWithIndependentFiltering
 	require.Equal(t, []string{"model-b"}, got[92])
 	require.EqualValues(t, 1, calls.Load(), "同一账号两个分组同时请求时只发一次上游请求")
 }
+
+// 腾讯 CodeBuddy 上游实测（2026-09-12）15/15 模型都能识别 OpenAI 形状的图片
+// content part，历史实现把整平台钉死为 text-only，导致客户端压根不发图片。
+func TestBuildCodexModelsManifestForGroupAdvertisesCodeBuddyImageInput(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 703
+	svc := &GatewayService{
+		accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{
+			groupID: {{
+				ID:          31,
+				Platform:    PlatformTencentCodeBuddy,
+				Type:        AccountTypeAPIKey,
+				Credentials: map[string]any{"access_token": "cb-token", "uid": "u1"},
+			}},
+		}},
+	}
+
+	body, err := svc.BuildCodexModelsManifestForGroup(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformTencentCodeBuddy},
+		"",
+		[]string{"hy3", "glm-5v-turbo"},
+	)
+	require.NoError(t, err)
+
+	models := decodeCodexManifestModels(t, body)
+	require.Len(t, models, 2)
+	for _, model := range models {
+		require.Equal(t, []any{"text", "image"}, model["input_modalities"],
+			"codebuddy %v should advertise image input", model["slug"])
+	}
+}
+
+// CodeBuddy 账号不参与图片能力判定时（平台不匹配）仍然必须保持 text-only，
+// 避免把 codebuddy 的放行误扩散到其它平台。
+func TestBuildCodexModelsManifestForGroupKeepsNonCodeBuddyImageGate(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 704
+	svc := &GatewayService{
+		accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{
+			groupID: {{
+				ID:          32,
+				Platform:    PlatformKimi,
+				Type:        AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "kimi-key"},
+			}},
+		}},
+	}
+
+	body, err := svc.BuildCodexModelsManifestForGroup(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"",
+		[]string{"kimi-k3-1"},
+	)
+	require.NoError(t, err)
+
+	models := decodeCodexManifestModels(t, body)
+	require.Len(t, models, 1)
+	require.Equal(t, []any{"text"}, models[0]["input_modalities"])
+}
+
+// CodeBuddy 上游识别 reasoning_effort（15 模型 × 4 档实测），因此 manifest 必须
+// 声明档位，否则客户端不显示推理选择器。
+func TestBuildCodexModelsManifestForGroupAdvertisesCodeBuddyReasoningLevels(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 705
+	svc := &GatewayService{
+		accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{
+			groupID: {{
+				ID:          33,
+				Platform:    PlatformTencentCodeBuddy,
+				Type:        AccountTypeAPIKey,
+				Credentials: map[string]any{"access_token": "cb-token"},
+			}},
+		}},
+	}
+
+	body, err := svc.BuildCodexModelsManifestForGroup(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformTencentCodeBuddy},
+		"",
+		[]string{"glm-5.3", "deepseek-v4.1-flash"},
+	)
+	require.NoError(t, err)
+
+	models := decodeCodexManifestModels(t, body)
+	require.Len(t, models, 2)
+	for _, model := range models {
+		// deepseek-* 名字前缀本会命中 DeepSeek 的 low/high/max，必须被 CodeBuddy
+		// 实测档位覆盖。
+		require.Equal(t, []string{"low", "medium", "high"}, effortsFromManifestModel(t, model),
+			"codebuddy %v reasoning levels", model["slug"])
+		require.Equal(t, "medium", model["default_reasoning_level"])
+	}
+}
+
+// 管理员手工声明的上下文窗口必须压过按模型名推断的兜底值：CodeBuddy 的
+// deepseek-v4-* 会命中 DeepSeek 分支拿到 1M，那套数字来自 DeepSeek 官方而非腾讯。
+func TestBuildCodexModelsManifestForGroupPrefersConfiguredModelCapability(t *testing.T) {
+	t.Parallel()
+
+	const groupID int64 = 706
+	settingRepo := &modelCapabilitySettingRepo{values: map[string]string{}}
+	svc := &GatewayService{
+		accountRepo: codexModelsVisibilityAccountRepo{byGroup: map[int64][]Account{
+			groupID: {{
+				ID:          34,
+				Platform:    PlatformTencentCodeBuddy,
+				Type:        AccountTypeAPIKey,
+				Credentials: map[string]any{"access_token": "cb-token"},
+			}},
+		}},
+		settingService: &SettingService{settingRepo: settingRepo},
+	}
+	_, err := svc.settingService.UpdateModelCapabilityConfig(context.Background(), ModelCapabilityConfig{
+		Models: []ModelCapabilityEntry{
+			{Platform: PlatformTencentCodeBuddy, ModelID: "deepseek-v4-pro", ContextWindow: 400_000},
+		},
+	})
+	require.NoError(t, err)
+
+	body, err := svc.BuildCodexModelsManifestForGroup(
+		context.Background(),
+		&Group{ID: groupID, Platform: PlatformTencentCodeBuddy},
+		"",
+		[]string{"deepseek-v4-pro", "hy3"},
+	)
+	require.NoError(t, err)
+
+	models := decodeCodexManifestModels(t, body)
+	require.Len(t, models, 2)
+	bySlug := map[string]map[string]any{}
+	for _, model := range models {
+		slug, _ := model["slug"].(string)
+		bySlug[slug] = model
+	}
+	// 覆盖生效：不再是 DeepSeek 分支的 1_000_000。
+	require.Equal(t, float64(400_000), bySlug["deepseek-v4-pro"]["context_window"])
+	require.Equal(t, float64(400_000), bySlug["deepseek-v4-pro"]["max_context_window"])
+	// 未覆盖的模型保持原兜底值，且仍声明图片输入。
+	require.Equal(t, float64(configuredCodexFallbackContext), bySlug["hy3"]["context_window"])
+	require.Equal(t, []any{"text", "image"}, bySlug["hy3"]["input_modalities"])
+}

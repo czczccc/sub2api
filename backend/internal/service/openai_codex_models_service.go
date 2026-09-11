@@ -145,6 +145,7 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		group,
 		nil,
 		true,
+		nil,
 	)
 	if err != nil {
 		return nil, false, fmt.Errorf("initialize group configured Codex models: %w", err)
@@ -262,6 +263,10 @@ func loadCodexGroupCatalogAccounts(ctx context.Context, repo AccountRepository, 
 			PlatformZhipu,
 			PlatformDeepseek,
 			PlatformMiniMax,
+			// CodeBuddy 必须列入：否则该分组取到的候选账号集为空，
+			// groupCodexModelSupportsImageInput 会因 candidates==0 恒为 false，
+			// 图片能力声明静默失效（表现为 /v1/models 与 manifest 都是 text-only）。
+			PlatformTencentCodeBuddy,
 		},
 		false,
 	)
@@ -424,6 +429,41 @@ type codexModelMetadataOverride struct {
 	UpstreamModelMetadata
 	reasoningConflict       bool
 	inputModalitiesConflict bool
+}
+
+// codeBuddyReasoningEfforts 是 CodeBuddy 上游识别的推理档位。
+//
+// 实测证据（2026-09-12，15 个模型 × {不传, low, medium, high}，指标为
+// usage.completion_thinking_tokens）：
+//
+//   - 上游确实识别 reasoning_effort：7 个模型（auto / deepseek-v4.1-flash /
+//     deepseek-v4-pro / glm-5.1 / glm-5.2 / glm-5v-turbo / minimax-m3）不传该字段时
+//     思考 token 为 0，传任意档位后变为 59~766。
+//   - 其余模型默认就思考（hy3 / hy3-x / kimi-* / glm-5.3 基线已 >0）。
+//   - 档位 → 思考量的映射是模型私有的，且**不单调**（glm-5.2: low 320 / medium 568 /
+//     high 330；hy4-preview: 369/475/303），所以这里只声明「参数被接受」，
+//     不对思考量做任何承诺，网关也只做透传。
+//   - 未被识别的字段（thinking / enable_thinking / reasoning）会被静默忽略，
+//     因此不存在传错参数报错的风险。
+var codeBuddyReasoningEfforts = []string{"low", "medium", "high"}
+
+// applyCodeBuddyCodexReasoningLevels 为 CodeBuddy 模型写入推理档位声明。
+// 必须在上游能力元数据与名字分支之后调用，才能覆盖按模型名前缀误判的
+// DeepSeek 档位（low/high/max）。
+func applyCodeBuddyCodexReasoningLevels(descriptor *configuredCodexModelDescriptor) {
+	if descriptor == nil {
+		return
+	}
+	defaultLevel := "medium"
+	levels := make([]configuredCodexReasoningLevel, 0, len(codeBuddyReasoningEfforts))
+	for _, effort := range codeBuddyReasoningEfforts {
+		levels = append(levels, configuredCodexReasoningLevel{
+			Effort:      effort,
+			Description: configuredCodexReasoningLevelDescription(effort),
+		})
+	}
+	descriptor.DefaultReasoningLevel = &defaultLevel
+	descriptor.SupportedReasoningLevels = levels
 }
 
 func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescriptor {
@@ -789,7 +829,18 @@ func claudeCodexDisplayName(modelID string) string {
 // routed through a custom provider. The response is also suitable for saving
 // as model_catalog_json in clients that do not refresh custom-provider catalogs.
 func BuildCodexModelsManifest(modelIDs []string) ([]byte, error) {
-	return buildCodexModelsManifest(modelIDs, nil, nil, nil, nil)
+	return buildCodexModelsManifest(modelIDs, "", nil, nil, nil, nil, nil)
+}
+
+// codexModelCapabilityResolver 返回查询管理员「模型能力覆盖」配置的闭包；
+// settingService 未装配（测试或裁剪部署）时返回 nil，调用方按无覆盖处理。
+func (s *GatewayService) codexModelCapabilityResolver() func(modelID string) (ModelCapabilityEntry, bool) {
+	if s == nil || s.settingService == nil {
+		return nil
+	}
+	return func(modelID string) (ModelCapabilityEntry, bool) {
+		return s.settingService.ResolveModelCapability(context.Background(), PlatformTencentCodeBuddy, modelID)
+	}
 }
 
 // BuildCodexModelsManifestForGroup derives input capabilities from the
@@ -827,6 +878,7 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 			compositeRoutesAvailable = false
 		}
 	}
+	resolveCapability := s.codexModelCapabilityResolver()
 	return buildCodexModelsManifestForAccounts(
 		effectivePlatform,
 		modelIDs,
@@ -834,6 +886,7 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 		group,
 		compositeRoutes,
 		compositeRoutesAvailable,
+		resolveCapability,
 	)
 }
 
@@ -844,6 +897,7 @@ func buildCodexModelsManifestForAccounts(
 	group *Group,
 	compositeRoutes []CompositeModelRoute,
 	compositeRoutesAvailable bool,
+	resolveCapability func(modelID string) (ModelCapabilityEntry, bool),
 ) ([]byte, error) {
 	imageInputModels := make(map[string]bool, len(modelIDs))
 	searchToolModels := make(map[string]bool, len(modelIDs))
@@ -886,15 +940,22 @@ func buildCodexModelsManifestForAccounts(
 			modelMetadata[modelID] = metadata
 		}
 	}
-	return buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
+	return buildCodexModelsManifest(modelIDs, effectivePlatform, imageInputModels, searchToolModels, metadataModels, modelMetadata, resolveCapability)
 }
 
+// buildCodexModelsManifest 组装 Codex 模型目录。
+//
+// resolveCapability 为可选的管理员「模型能力覆盖」查询（平台, 模型）→条目；
+// 非 nil 时会覆盖按名字推断出的上下文窗口与输入模态，让手工声明的真实数值
+// 胜出（例如 CodeBuddy 的模型名会误命中 DeepSeek 分支拿到 1M 上下文与三档推理）。
 func buildCodexModelsManifest(
 	modelIDs []string,
+	platform string,
 	imageInputModels map[string]bool,
 	searchToolModels map[string]bool,
 	metadataModels map[string]string,
 	modelMetadata map[string]codexModelMetadataOverride,
+	resolveCapability func(modelID string) (ModelCapabilityEntry, bool),
 ) ([]byte, error) {
 	seen := make(map[string]struct{}, len(modelIDs))
 	models := make([]json.RawMessage, 0, len(modelIDs))
@@ -924,6 +985,25 @@ func buildCodexModelsManifest(
 			// Apply the capability-derived modality after upstream metadata so
 			// a stale official Astra snapshot cannot downgrade the catalog.
 			descriptor.InputModalities = []string{"text", "image"}
+		}
+		if platform == PlatformTencentCodeBuddy {
+			// 放在 upstream metadata 之后：DeepSeek 名字分支（deepseek-v4-*）会先
+			// 写入 low/high/max 与 1M 上下文，那套数值来自 DeepSeek 官方而非腾讯，
+			// 这里用 CodeBuddy 自己的实测结论覆盖。
+			applyCodeBuddyCodexReasoningLevels(&descriptor)
+		}
+		if resolveCapability != nil {
+			// 管理员手工声明的能力最后应用：它是唯一的"权威"来源，必须压过
+			// 上游元数据与所有按模型名推断的兜底值。
+			if capability, ok := resolveCapability(modelID); ok {
+				if capability.ContextWindow > 0 {
+					descriptor.ContextWindow = capability.ContextWindow
+					descriptor.MaxContextWindow = capability.ContextWindow
+				}
+				if len(capability.InputModalities) > 0 {
+					descriptor.InputModalities = capability.InputModalities
+				}
+			}
 		}
 		if metadataModelID != modelID {
 			descriptor.DisplayName = modelID
@@ -1074,7 +1154,8 @@ func groupCodexModelSupportsImageInput(
 			return false
 		}
 	}
-	if platform != PlatformOpenAI && platform != PlatformGrok && platform != PlatformDeepseek {
+	if platform != PlatformOpenAI && platform != PlatformGrok && platform != PlatformDeepseek &&
+		platform != PlatformTencentCodeBuddy {
 		return false
 	}
 
@@ -1247,6 +1328,13 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 		}
 		canonical := xai.ResolveGrokTextResponsesModelID(upstreamModel)
 		return isGrokCodexImageInputModel(canonical)
+	case PlatformTencentCodeBuddy:
+		// 实测（2026-09-12，15/15 模型）：腾讯上游接受 OpenAI 形状的
+		// messages[].content 图片部分，data URL 与公网 URL 两种形态都能识别；
+		// 对照组（同问题不带图）会给出错误答案，确认模型确实看到了图片。
+		// 因此 codebuddy 无需逐模型判定，整平台声明支持图片输入。
+		// 默认模态与 /v1/models 共用同一来源，避免两处声明漂移。
+		return stringSliceContains(CodeBuddyDefaultInputModalities(), "image")
 	default:
 		return false
 	}
@@ -2142,7 +2230,13 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 			searchToolModels[modelID] = true
 		}
 	}
-	converted, err := buildCodexModelsManifest(modelIDs, imageInputModels, searchToolModels, metadataModels, modelMetadata)
+	// account 允许为 nil（独立的模型列表转换入口），平台未知时按无平台处理，
+	// 避免此处为了取平台名而引入空指针。
+	manifestPlatform := ""
+	if account != nil {
+		manifestPlatform = account.Platform
+	}
+	converted, err := buildCodexModelsManifest(modelIDs, manifestPlatform, imageInputModels, searchToolModels, metadataModels, modelMetadata, nil)
 	if err != nil {
 		return body
 	}

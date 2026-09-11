@@ -1372,3 +1372,28 @@ func TestSyncUpstreamModelCatalogSkipsCapabilityWarningForCodeBuddy(t *testing.T
 	// 能力不完整时不落盘快照（与既有语义一致）。
 	require.Empty(t, repo.updates)
 }
+
+// Scenario: CodeBuddy 上游只有 /v2/chat/completions。若不在此处固定走 CC 回退，
+// /v1/responses 会被发到不存在的 /responses 端点（上游 404 Route Not Found → 502）。
+func TestShouldForwardOpenAIResponsesViaRawChatCompletions_CodeBuddyAlwaysUsesCC(t *testing.T) {
+	t.Parallel()
+
+	account := &Account{
+		Platform:    PlatformTencentCodeBuddy,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"access_token": "cb-token"},
+	}
+	require.True(t, shouldForwardOpenAIResponsesViaRawChatCompletions(account))
+
+	// 即便探针 Extra 声称支持 Responses，也必须保持 CC：该端点在腾讯侧不存在。
+	account.Extra = map[string]any{"openai_responses_supported": true}
+	require.True(t, shouldForwardOpenAIResponsesViaRawChatCompletions(account))
+
+	// 非 APIKey 账号（如 OAuth）不适用该回退，语义与其它平台一致。
+	oauth := &Account{
+		Platform: PlatformTencentCodeBuddy,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"openai_responses_supported": true},
+	}
+	require.False(t, shouldForwardOpenAIResponsesViaRawChatCompletions(oauth))
+}

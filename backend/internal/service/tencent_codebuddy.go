@@ -189,6 +189,18 @@ func (a *Account) IsTencentCodeBuddy() bool {
 	return a != nil && a.Platform == PlatformTencentCodeBuddy
 }
 
+// CodeBuddyDefaultInputModalities 是 CodeBuddy 模型对外声明的默认输入模态。
+//
+// 依据（2026-09-12 实测 15/15 模型）：腾讯上游接受 OpenAI 形状的
+// messages[].content 图片部分，data URL 与公网 URL 两种形态都能被正确识别；
+// 同问题不带图的对照组给出错误答案，确认模型确实看到了图片。
+//
+// 这是**默认值**而不是硬约束：/v1/models 与 Codex manifest 都优先采用管理员在
+// 「模型能力覆盖」里配置的 input_modalities，未配置时才回落到这里。
+func CodeBuddyDefaultInputModalities() []string {
+	return []string{"text", "image"}
+}
+
 // TencentCodeBuddyCredential 返回账号凭据的强类型视图（读取路径唯一入口）。
 func (a *Account) TencentCodeBuddyCredential() TencentCodeBuddyCredential {
 	if a == nil {

@@ -1350,6 +1350,14 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 		// Grok/GPT/Muse into Chat Completions.
 		return false
 	}
+	if account.IsTencentCodeBuddy() {
+		// 腾讯私有上游只有 /v2/chat/completions。账号 Extra 没有探针结论时
+		// ResolveResponsesSupport 为 Unknown，函数末尾会返回 false，把
+		// /v1/responses 请求发到并不存在的 /responses 端点（上游回
+		// 404 Route Not Found，客户端看到 502）。CodeBuddy 不存在原生 Responses
+		// 端点，因此固定走 CC 回退。
+		return true
+	}
 	if account.IsCNProvider() {
 		// CN 的显式协议配置优先于异步探针 Extra；adaptive 仅 DeepSeek / Kimi
 		// 有原生 Responses，GLM 回退 Chat Completions。
