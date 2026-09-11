@@ -856,6 +856,31 @@ Antigravity accounts support optional **hybrid scheduling**. When enabled, the g
 
 > **⚠️ Warning**: Anthropic Claude and Antigravity Claude **cannot be mixed within the same conversation context**. Use groups to isolate them properly.
 
+## Tencent CodeBuddy Support
+
+Sub2API supports Tencent CodeBuddy (mainland China) accounts through the private
+`copilot.tencent.com/v2` upstream. The upstream host and the `X-Domain` identity
+header are fixed by the backend — accounts only carry tokens and optional
+identity fields, never a Base URL.
+
+Probed upstream capabilities (2026-09-12):
+
+- **Image input** — all 15 catalog models accept OpenAI-shaped `image_url` parts,
+  both inline `data:` URLs and public HTTPS URLs.
+- **Reasoning effort** — `reasoning_effort` is honoured; `low` / `medium` / `high`
+  are advertised in the Codex models manifest.
+- **Not supported** — non-streaming requests (`11101`); the gateway normalises
+  `role: "developer"` and object-form `tool_choice` before forwarding (`11128`).
+
+Context windows and output limits have no upstream source, so they are declared
+by an operator under **Settings → Model capabilities**.
+
+> **Client note**: the gateway advertises `input_modalities` and reasoning levels,
+> but clients that keep their **own** model capability table (DSH, pi, …) will
+> still block images and hide the thinking selector until the same capabilities
+> are declared locally. See the
+> [CodeBuddy client setup guide](docs/CODEBUDDY_CLIENT_SETUP.md).
+
 ---
 
 ## Project Structure

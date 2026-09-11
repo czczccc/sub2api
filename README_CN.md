@@ -748,6 +748,26 @@ Antigravity 账户支持可选的**混合调度**功能。开启后，通用端�
 
 > **⚠️ 注意**：Anthropic Claude 和 Antigravity Claude **不能在同一上下文中混合使用**，请通过分组功能做好隔离。
 
+## 腾讯 CodeBuddy 使用说明
+
+Sub2API 支持腾讯 CodeBuddy（中国大陆版）账号，走私有上游 `copilot.tencent.com/v2`。
+上游 host 与 `X-Domain` 身份头由后端固定，账号只需保存令牌与可选身份字段，**不接受
+Base URL**。
+
+实测上游能力（2026-09-12）：
+
+- **图片输入** —— 15 个模型全部接受 OpenAI 形状的 `image_url`，内联 `data:` URL
+  与公网 HTTPS URL 均可。
+- **推理档位** —— 识别 `reasoning_effort`；Codex 模型清单里声明 `low` / `medium` / `high`。
+- **不支持** —— 非流式请求（业务码 `11101`）；网关会在转发前归一化
+  `role: "developer"` 与对象形态的 `tool_choice`（否则命中 `11128`）。
+
+上下文窗口与输出上限没有上游来源，由管理员在**系统设置 → 模型能力**中手工声明。
+
+> **客户端注意**：网关虽然会声明 `input_modalities` 与推理档位，但**自带模型能力表**
+> 的客户端（DSH、pi 等）仍会拦截图片、隐藏思考档位菜单，直到在本机配置里做同样的
+> 声明。详见 [CodeBuddy 客户端接入说明](docs/CODEBUDDY_CLIENT_SETUP.md)。
+
 ---
 
 ## 项目结构
