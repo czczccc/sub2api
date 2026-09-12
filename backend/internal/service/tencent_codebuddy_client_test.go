@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -129,7 +130,7 @@ func TestParseTencentCodeBuddyCredential(t *testing.T) {
 		"refresh_token": " rt ",
 		"uid":           " u1 ",
 		"enterprise_id": " e1 ",
-		// 历史遗留的国际版取值必须被收敛到大陆版：当前只接入 CodeBuddy 大陆版。
+		// 国际版取值是合法枚举，必须原样保留（不再收敛到大陆版）。
 		"product":    "WORKBUDDY",
 		"region":     "GLOBAL",
 		"expires_at": "2030-01-02T03:04:05Z",
@@ -138,18 +139,22 @@ func TestParseTencentCodeBuddyCredential(t *testing.T) {
 	require.Equal(t, "rt", cred.RefreshToken)
 	require.Equal(t, "u1", cred.UserID)
 	require.Equal(t, "e1", cred.EnterpriseID)
-	require.Equal(t, TencentCodeBuddyProductCodeBuddy, cred.Product)
-	require.Equal(t, TencentCodeBuddyRegionChina, cred.Region)
+	require.Equal(t, TencentCodeBuddyProductWorkBuddy, cred.Product)
+	require.Equal(t, TencentCodeBuddyRegionGlobal, cred.Region)
 	require.True(t, cred.HasAccessToken())
 	require.NotNil(t, cred.ExpiresAt)
 	require.Equal(t, time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC), *cred.ExpiresAt)
 
-	// 缺失字段落到零值 + 归一化默认，且永不报错。
+	// 缺失字段落到零值 + 归一化默认（大陆 CodeBuddy），且永不报错。
 	empty := ParseTencentCodeBuddyCredential(nil)
 	require.False(t, empty.HasAccessToken())
 	require.Nil(t, empty.ExpiresAt)
 	require.Equal(t, TencentCodeBuddyProductCodeBuddy, empty.Product)
 	require.Equal(t, TencentCodeBuddyRegionChina, empty.Region)
+	// 非法取值同样回落到默认。
+	invalid := ParseTencentCodeBuddyCredential(map[string]any{"product": "bogus", "region": "mars"})
+	require.Equal(t, TencentCodeBuddyProductCodeBuddy, invalid.Product)
+	require.Equal(t, TencentCodeBuddyRegionChina, invalid.Region)
 	require.Nil(t, ParseTencentCodeBuddyCredential(map[string]any{"expires_at": "not-a-time"}).ExpiresAt)
 
 	// Unix 毫秒时间戳。
@@ -159,7 +164,7 @@ func TestParseTencentCodeBuddyCredential(t *testing.T) {
 }
 
 func TestTencentCodeBuddyCredentialDomainResolution(t *testing.T) {
-	// 未显式提供 domain 时使用固定的大陆默认值（与参考实现 DEFAULT_DOMAIN 一致）。
+	// 未显式提供 domain 时使用该站点的默认值。
 	plain := ParseTencentCodeBuddyCredential(map[string]any{
 		tencentCodeBuddyCredProduct: TencentCodeBuddyProductCodeBuddy,
 		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionChina,
@@ -167,6 +172,14 @@ func TestTencentCodeBuddyCredentialDomainResolution(t *testing.T) {
 	require.Equal(t, tencentCodeBuddyDomain, plain.Domain)
 	require.Equal(t, "www.codebuddy.cn", plain.Domain)
 	require.Equal(t, tencentCodeBuddyDomain, plain.Endpoint().Domain)
+
+	// 国际版 WorkBuddy 回落到它自己的默认域，而不是大陆域。
+	intl := ParseTencentCodeBuddyCredential(map[string]any{
+		tencentCodeBuddyCredProduct: TencentCodeBuddyProductWorkBuddy,
+		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionGlobal,
+	})
+	require.Equal(t, "www.workbuddy.ai", intl.Domain)
+	require.Equal(t, tencentWorkBuddyAPIHostIntl, intl.Endpoint().Host)
 
 	// 账号级 domain 覆盖默认值（对应官方登录态的 auth.domain 语义）。
 	custom := ParseTencentCodeBuddyCredential(map[string]any{
@@ -178,12 +191,13 @@ func TestTencentCodeBuddyCredentialDomainResolution(t *testing.T) {
 	// 非默认 domain 落盘；默认值不落盘，避免把默认值当成显式配置固化。
 	require.Equal(t, "tenant.example.com", custom.Apply(nil)[tencentCodeBuddyCredDomain])
 	require.NotContains(t, plain.Apply(nil), tencentCodeBuddyCredDomain)
+	require.NotContains(t, intl.Apply(nil), tencentCodeBuddyCredDomain)
 }
 
 func TestTencentCodeBuddyCredentialApplyPreservesOtherKeys(t *testing.T) {
 	cred := ParseTencentCodeBuddyCredential(map[string]any{
 		"access_token": "at-new",
-		// 历史国际版取值：应被收敛到大陆版。
+		// 国际版取值应被保留。
 		"product":    "workbuddy",
 		"region":     "global",
 		"expires_at": "2030-01-02T03:04:05Z",
@@ -195,8 +209,8 @@ func TestTencentCodeBuddyCredentialApplyPreservesOtherKeys(t *testing.T) {
 	out := cred.Apply(base)
 
 	require.Equal(t, "at-new", out[tencentCodeBuddyCredAccessToken])
-	require.Equal(t, TencentCodeBuddyProductCodeBuddy, out[tencentCodeBuddyCredProduct])
-	require.Equal(t, TencentCodeBuddyRegionChina, out[tencentCodeBuddyCredRegion])
+	require.Equal(t, TencentCodeBuddyProductWorkBuddy, out[tencentCodeBuddyCredProduct])
+	require.Equal(t, TencentCodeBuddyRegionGlobal, out[tencentCodeBuddyCredRegion])
 	require.Equal(t, "2030-01-02T03:04:05Z", out[tencentCodeBuddyCredExpiresAt])
 	require.Contains(t, out, "model_mapping")
 	// Apply 只覆盖 token 相关字段，不负责清理 base_url（那是写入路径归一化的职责）。
@@ -229,17 +243,38 @@ func TestTencentCodeBuddyCredentialNeedsRefresh(t *testing.T) {
 
 // ===== 2. Endpoint 选择 =====
 
-func TestResolveTencentCodeBuddyEndpoint_IsFixedToMainlandCodeBuddy(t *testing.T) {
-	// 当前只接入大陆版：任何输入都解析到同一个 host + 同一个 X-Domain。
-	// host 依据：参考实现 codebuddy2openai 硬编码 copilot.tencent.com；
-	// workbuddy2api 有断言 "bases must be CN regardless of domain"。
-	cases := [][2]string{
-		{TencentCodeBuddyProductCodeBuddy, TencentCodeBuddyRegionChina},
-		{"bogus", "mars"},           // 非法输入收敛
-		{" WorkBuddy ", " GLOBAL "}, // 历史国际版取值同样收敛
-		{"", ""},                    // 缺省
+func TestResolveTencentCodeBuddyEndpoint_SiteMatrix(t *testing.T) {
+	// product × region 四个组合各自解析到独立站点，均经实测 reachable。
+	// 参考实现历史只支持大陆 CodeBuddy；国际版（尤其 workbuddy.ai）是本仓库新增能力。
+	cases := []struct {
+		product string
+		region  string
+		baseURL string
+		host    string
+		domain  string
+	}{
+		{TencentCodeBuddyProductCodeBuddy, TencentCodeBuddyRegionChina, "https://copilot.tencent.com/v2", "https://copilot.tencent.com", "www.codebuddy.cn"},
+		{TencentCodeBuddyProductCodeBuddy, TencentCodeBuddyRegionGlobal, "https://www.codebuddy.ai/v2", "https://www.codebuddy.ai", "www.codebuddy.ai"},
+		{TencentCodeBuddyProductWorkBuddy, TencentCodeBuddyRegionChina, "https://www.workbuddy.cn/v2", "https://www.workbuddy.cn", "www.workbuddy.cn"},
+		{TencentCodeBuddyProductWorkBuddy, TencentCodeBuddyRegionGlobal, "https://www.workbuddy.ai/v2", "https://www.workbuddy.ai", "www.workbuddy.ai"},
 	}
 	for _, tc := range cases {
+		endpoint := ResolveTencentCodeBuddyEndpoint(tc.product, tc.region)
+		require.Equal(t, tc.baseURL, endpoint.BaseURL, "input=%q/%q", tc.product, tc.region)
+		require.Equal(t, tc.host, endpoint.Host, "input=%q/%q", tc.product, tc.region)
+		require.Equal(t, tc.domain, endpoint.Domain, "input=%q/%q", tc.product, tc.region)
+		require.Equal(t, tc.product, endpoint.Product)
+		require.Equal(t, tc.region, endpoint.Region)
+	}
+
+	// 大小写与空白容忍：归一化后再查表。
+	normalized := ResolveTencentCodeBuddyEndpoint(" WorkBuddy ", " GLOBAL ")
+	require.Equal(t, "https://www.workbuddy.ai/v2", normalized.BaseURL)
+	require.Equal(t, TencentCodeBuddyProductWorkBuddy, normalized.Product)
+	require.Equal(t, TencentCodeBuddyRegionGlobal, normalized.Region)
+
+	// 非法/缺省输入回落到大陆 CodeBuddy（保持存量账号语义不变）。
+	for _, tc := range [][2]string{{"bogus", "mars"}, {"", ""}} {
 		endpoint := ResolveTencentCodeBuddyEndpoint(tc[0], tc[1])
 		require.Equal(t, "https://copilot.tencent.com/v2", endpoint.BaseURL, "input=%q/%q", tc[0], tc[1])
 		require.Equal(t, "www.codebuddy.cn", endpoint.Domain, "input=%q/%q", tc[0], tc[1])
@@ -247,18 +282,26 @@ func TestResolveTencentCodeBuddyEndpoint_IsFixedToMainlandCodeBuddy(t *testing.T
 		require.Equal(t, TencentCodeBuddyRegionChina, endpoint.Region)
 	}
 
-	// 受支持枚举只有大陆版一项。
-	require.Equal(t, []string{TencentCodeBuddyProductCodeBuddy}, TencentCodeBuddyProducts())
-	require.Equal(t, []string{TencentCodeBuddyRegionChina}, TencentCodeBuddyRegions())
+	// 受支持枚举：product 两项、region 两项。
+	require.Equal(t, []string{TencentCodeBuddyProductCodeBuddy, TencentCodeBuddyProductWorkBuddy}, TencentCodeBuddyProducts())
+	require.Equal(t, []string{TencentCodeBuddyRegionChina, TencentCodeBuddyRegionGlobal}, TencentCodeBuddyRegions())
 	require.True(t, IsTencentCodeBuddyProduct("codebuddy"))
-	require.False(t, IsTencentCodeBuddyProduct("workbuddy"))
+	require.True(t, IsTencentCodeBuddyProduct("workbuddy"))
+	require.False(t, IsTencentCodeBuddyProduct("bogus"))
 	require.True(t, IsTencentCodeBuddyRegion("china"))
-	require.False(t, IsTencentCodeBuddyRegion("global"))
+	require.True(t, IsTencentCodeBuddyRegion("global"))
+	require.False(t, IsTencentCodeBuddyRegion("mars"))
 
-	// 账号无法通过 credentials.base_url 覆盖 endpoint。
-	account := tencentCodeBuddyTestAccount(map[string]any{"base_url": "https://evil.example.com"})
-	require.Equal(t, tencentCodeBuddyAPIRoot, account.TencentCodeBuddyBaseURL())
-	require.Equal(t, tencentCodeBuddyAPIRoot, account.TencentCodeBuddyCredential().Endpoint().BaseURL)
+	// 账号无法通过 credentials.base_url 覆盖 endpoint：国际版账号仍落在自己的站点。
+	account := tencentCodeBuddyTestAccount(map[string]any{
+		"base_url": "https://evil.example.com",
+		"product":  TencentCodeBuddyProductWorkBuddy,
+		"region":   TencentCodeBuddyRegionGlobal,
+	})
+	require.Equal(t, "https://www.workbuddy.ai/v2", account.TencentCodeBuddyBaseURL())
+	require.Equal(t, "https://www.workbuddy.ai/v2", account.TencentCodeBuddyCredential().Endpoint().BaseURL)
+	// 默认账号仍是大陆 CodeBuddy。
+	require.Equal(t, tencentCodeBuddyAPIRoot, tencentCodeBuddyTestAccount(nil).TencentCodeBuddyBaseURL())
 }
 
 // ===== 3. Token 刷新 =====
@@ -453,7 +496,7 @@ func TestTencentCodeBuddyClientFetchModels(t *testing.T) {
 			requests := upstream.requests()
 			require.Len(t, requests, 1)
 			require.Equal(t, http.MethodGet, requests[0].Method)
-			// 模型目录挂在 host 根，不在 /v2 下。
+			// 模型目录挂在 host 根，不在 /v2 下；且 host 由账号的 product × region 决定。
 			require.Equal(t, tencentCodeBuddyAPIHost+tencentCodeBuddyModelsPath, requests[0].URL)
 			require.Equal(t, "Bearer at-test", requests[0].Header.Get("Authorization"))
 		})
@@ -521,13 +564,13 @@ func TestTencentCodeBuddyClientChatCompletion_RequestContract(t *testing.T) {
 	require.Equal(t, "uid-1", requests[0].Header.Get("X-User-Id"))
 }
 
-func TestTencentCodeBuddyClientChatCompletion_AlwaysMainlandEndpoint(t *testing.T) {
+func TestTencentCodeBuddyClientChatCompletion_RoutesBySite(t *testing.T) {
 	upstream := newTencentCodeBuddyTestUpstream(t, jsonHandler(http.StatusOK, `{"id":"cmpl-2"}`))
 	client := NewTencentCodeBuddyClient(upstream)
-	// 即便凭据里带历史国际版取值，也必须打到大陆 endpoint 与 X-Domain。
+	// 国际版 WorkBuddy 必须打到 workbuddy.ai 站点并使用它自己的 X-Domain。
 	account := tencentCodeBuddyTestAccount(map[string]any{
-		tencentCodeBuddyCredProduct: "workbuddy",
-		tencentCodeBuddyCredRegion:  "global",
+		tencentCodeBuddyCredProduct: TencentCodeBuddyProductWorkBuddy,
+		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionGlobal,
 	})
 
 	resp, err := client.ChatCompletion(context.Background(), account, []byte(`{"model":"auto"}`), false)
@@ -536,8 +579,33 @@ func TestTencentCodeBuddyClientChatCompletion_AlwaysMainlandEndpoint(t *testing.
 
 	requests := upstream.requests()
 	require.Len(t, requests, 1)
-	require.Equal(t, "https://copilot.tencent.com/v2/chat/completions", requests[0].URL)
-	require.Equal(t, "www.codebuddy.cn", requests[0].Header.Get("X-Domain"))
+	require.Equal(t, "https://www.workbuddy.ai/v2/chat/completions", requests[0].URL)
+	require.Equal(t, "www.workbuddy.ai", requests[0].Header.Get("X-Domain"))
+
+	// 账号级 domain 覆盖只影响 X-Domain，不改变 host。
+	overridden := tencentCodeBuddyTestAccount(map[string]any{
+		tencentCodeBuddyCredProduct: TencentCodeBuddyProductWorkBuddy,
+		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionGlobal,
+		tencentCodeBuddyCredDomain:  "tenant.example.com",
+	})
+	resp2, err := client.ChatCompletion(context.Background(), overridden, []byte(`{"model":"auto"}`), false)
+	require.NoError(t, err)
+	defer func() { _ = resp2.Body.Close() }()
+
+	requests = upstream.requests()
+	require.Len(t, requests, 2)
+	require.Equal(t, "https://www.workbuddy.ai/v2/chat/completions", requests[1].URL)
+	require.Equal(t, "tenant.example.com", requests[1].Header.Get("X-Domain"))
+
+	// 默认账号（无 product/region）仍打到大陆 CodeBuddy。
+	resp3, err := client.ChatCompletion(context.Background(), tencentCodeBuddyTestAccount(nil), []byte(`{"model":"auto"}`), false)
+	require.NoError(t, err)
+	defer func() { _ = resp3.Body.Close() }()
+
+	requests = upstream.requests()
+	require.Len(t, requests, 3)
+	require.Equal(t, "https://copilot.tencent.com/v2/chat/completions", requests[2].URL)
+	require.Equal(t, "www.codebuddy.cn", requests[2].Header.Get("X-Domain"))
 }
 
 // ===== 6. Stream 转换 =====
@@ -690,4 +758,164 @@ func TestTencentCodeBuddyClientApplyBearerSkipsEmptyToken(t *testing.T) {
 
 	client.ApplyBearer(header, TencentCodeBuddyCredential{AccessToken: "at"})
 	require.Equal(t, "Bearer at", header.Get("Authorization"))
+}
+
+// ===== 7. WorkBuddy 模型目录兜底 =====
+
+// workBuddyIntlTestAccount 是国际版 WorkBuddy 测试账号。
+func workBuddyIntlTestAccount() *Account {
+	return tencentCodeBuddyTestAccount(map[string]any{
+		tencentCodeBuddyCredProduct: TencentCodeBuddyProductWorkBuddy,
+		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionGlobal,
+	})
+}
+
+// TestFetchTencentCodeBuddyUpstreamModels_ReportsFailureWhenBothPathsFail
+// 目录接口两个路径都不可用时，必须如实上报为上游故障——不能用一个可能过时/不完整的
+// 静态表掩盖，否则用户会看到一份"看起来对但少了模型"的清单。
+func TestFetchTencentCodeBuddyUpstreamModels_ReportsFailureWhenBothPathsFail(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     http.Header{"Content-Type": []string{"text/html"}},
+		Body:       io.NopCloser(strings.NewReader(`<html><title>500 Internal Server Error</title></html>`)),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+
+	_, err := svc.fetchTencentCodeBuddyUpstreamModels(context.Background(), workBuddyIntlTestAccount())
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadGateway, upstreamModelSyncStatusCode(err))
+	// 两个路径都被尝试过。
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://www.workbuddy.ai"+tencentCodeBuddyModelsPath, upstream.requests[0].URL.String())
+	require.Equal(t, "https://www.workbuddy.ai"+tencentCodeBuddyModelsPathLegacy, upstream.requests[1].URL.String())
+}
+
+// TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyUsesRealCatalog
+// 回归锁：国际版的真实目录来自 /v2/enterprises/personal/models，响应形态是
+// data.models[].id（含 credits/name 等元信息），而不是大陆站的 data.agents[].models。
+func TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyUsesRealCatalog(t *testing.T) {
+	const payload = `{"code":0,"msg":"OK","data":{
+		"models":[
+			{"id":"default-model","name":"Auto","credits":"x0.79 credits","supportsImages":true},
+			{"id":"gpt-5.6-sol","name":"GPT-5.6-Sol","credits":"x3.47"},
+			{"id":"gemini-3.5-flash","name":"Gemini-3.5-Flash","credits":"x0.99"},
+			{"id":"glm-5.3","name":"GLM-5.3","credits":"x0.79"}
+		]}}`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(payload)),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+
+	models, err := svc.fetchTencentCodeBuddyUpstreamModels(context.Background(), workBuddyIntlTestAccount())
+	require.NoError(t, err)
+	require.Equal(t, []string{"default-model", "gemini-3.5-flash", "glm-5.3", "gpt-5.6-sol"}, models)
+	require.Len(t, upstream.requests, 1)
+}
+
+// TestFetchModels_UsesV2PathFirst 锁定真实站点差异的修复：官方客户端用的是
+// /v2/enterprises/personal/models，而老代码用的是 /console/...——后者在国际站
+// （www.workbuddy.ai）带令牌恒返回 APISIX 原始 500。主路径可用时**不应**再打老路径。
+func TestFetchModels_UsesV2PathFirst(t *testing.T) {
+	const payload = `{"code":0,"msg":"OK","data":{"models":[{"id":"gpt-6-astra"},{"id":"gemini-3.5-flash"}]}}`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(payload)),
+	}}
+	client := NewTencentCodeBuddyClient(upstream)
+
+	models, status, err := client.fetchModels(context.Background(), workBuddyIntlTestAccount())
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, []string{"gemini-3.5-flash", "gpt-6-astra"}, models)
+	// 只打主路径一次，不回退。
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "https://www.workbuddy.ai/v2/enterprises/personal/models", upstream.requests[0].URL.String())
+}
+
+// TestFetchModels_FallsBackToLegacyPath 主路径失败时回退到参考实现的老路径。
+func TestFetchModels_FallsBackToLegacyPath(t *testing.T) {
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusInternalServerError,
+			Body:       io.NopCloser(strings.NewReader(`<html>500</html>`)),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"code":0,"data":{"agents":[{"name":"cli","models":["auto","glm-5.3"]}]}}`)),
+		},
+	}}
+	client := NewTencentCodeBuddyClient(upstream)
+
+	models, status, err := client.fetchModels(context.Background(), tencentCodeBuddyTestAccount(nil))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, []string{"auto", "glm-5.3"}, models)
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://copilot.tencent.com"+tencentCodeBuddyModelsPath, upstream.requests[0].URL.String())
+	require.Equal(t, "https://copilot.tencent.com"+tencentCodeBuddyModelsPathLegacy, upstream.requests[1].URL.String())
+}
+
+// TestFetchModels_DoesNotRetryLegacyOnAuthFailure 令牌失效时不再换路径重试：
+// 那说明凭据有问题，换路径也是一样的结果，只会把一次明确的鉴权错误拖成两次往返。
+func TestFetchModels_DoesNotRetryLegacyOnAuthFailure(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Body:       io.NopCloser(strings.NewReader(`{"code":1001,"msg":"unauthorized"}`)),
+	}}
+	client := NewTencentCodeBuddyClient(upstream)
+
+	_, status, err := client.fetchModels(context.Background(), tencentCodeBuddyTestAccount(nil))
+	require.Error(t, err)
+	require.Equal(t, http.StatusUnauthorized, status)
+	require.Len(t, upstream.requests, 1, "401 不应触发老路径重试")
+}
+
+// TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyStillReportsTokenFailure
+// 兜底不得掩盖凭据问题：401/403 说明令牌失效，必须照旧上报。
+func TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyStillReportsTokenFailure(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Body:       io.NopCloser(strings.NewReader(`<html>401 Authorization Required</html>`)),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+
+	_, err := svc.fetchTencentCodeBuddyUpstreamModels(context.Background(), workBuddyIntlTestAccount())
+	require.Error(t, err, "令牌失效必须上报，不能被静态目录兜底掩盖")
+}
+
+// TestFetchTencentCodeBuddyUpstreamModels_MainlandDoesNotFallBack
+// 大陆 CodeBuddy 的目录接口是好的：那里出现 5xx 属于真实故障，必须照旧上报，
+// 不能被静态表掩盖。
+func TestFetchTencentCodeBuddyUpstreamModels_MainlandDoesNotFallBack(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       io.NopCloser(strings.NewReader(`<html>500</html>`)),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+
+	_, err := svc.fetchTencentCodeBuddyUpstreamModels(context.Background(), tencentCodeBuddyTestAccount(nil))
+	require.Error(t, err, "大陆站的真实故障不得被静态目录掩盖")
+	// 客户端把上游 HTTP 错误统一包成 502（TENCENT_CODEBUDDY_MODELS_HTTP_ERROR），
+	// 同步层据此判定为上游故障。
+	require.Equal(t, http.StatusBadGateway, upstreamModelSyncStatusCode(err))
+}
+
+// TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyPrefersLiveCatalog
+// 兜底只在目录不可用时生效：一旦上游能返回目录，必须用实时结果。
+func TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyPrefersLiveCatalog(t *testing.T) {
+	const payload = `{"code":0,"msg":"OK","data":{"agents":[{"name":"cli","models":["auto","glm-9.9"]}]}}`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(payload)),
+	}}
+	svc := &AccountTestService{httpUpstream: upstream}
+
+	models, err := svc.fetchTencentCodeBuddyUpstreamModels(context.Background(), workBuddyIntlTestAccount())
+	require.NoError(t, err)
+	require.Equal(t, []string{"auto", "glm-9.9"}, models)
 }

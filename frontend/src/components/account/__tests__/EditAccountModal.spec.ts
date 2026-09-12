@@ -196,6 +196,42 @@ describe('EditAccountModal / Tencent CodeBuddy', () => {
 
     wrapper.unmount()
   })
+
+  it('国际版 WorkBuddy 账号回填站点，并按该站点展示默认域占位符', async () => {
+    const account = buildCodeBuddyAccount()
+    account.credentials = {
+      ...account.credentials,
+      product: 'workbuddy',
+      region: 'global',
+      domain: ''
+    }
+    const wrapper = mountModal(account)
+    await nextTick()
+
+    // 站点选择器按 product/region 选中，默认域占位符跟随站点（workbuddy.ai 而非 codebuddy.cn）。
+    const selected = wrapper.get('[data-testid="edit-codebuddy-site-workbuddy/global"]')
+    expect(selected.classes().join(' ')).toContain('ring-sky-500')
+
+    const domainInput = wrapper.get<HTMLInputElement>('input[placeholder="www.workbuddy.ai"]')
+    expect(domainInput.element.value).toBe('')
+
+    wrapper.unmount()
+  })
+
+  it('缺失 product/region 的存量账号回落到大陆 CodeBuddy', async () => {
+    const account = buildCodeBuddyAccount()
+    const { product: _p, region: _r, ...rest } = account.credentials
+    account.credentials = rest
+    const wrapper = mountModal(account)
+    await nextTick()
+
+    const selected = wrapper.get('[data-testid="edit-codebuddy-site-codebuddy/china"]')
+    expect(selected.classes().join(' ')).toContain('ring-sky-500')
+    // 占位符是大陆默认域，domain 字段仍回填账号自身的值。
+    expect(wrapper.find('input[placeholder="www.codebuddy.cn"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
 })
 
 function buildAccount() {

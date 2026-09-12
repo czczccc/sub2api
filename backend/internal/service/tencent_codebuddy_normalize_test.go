@@ -102,6 +102,38 @@ func TestAdminServiceUpdateAccount_NormalizesTencentCodeBuddyCredentials(t *test
 	require.Len(t, repo.updatedAccounts, 1)
 }
 
+// TestAdminServiceUpdateAccount_KeepsInternationalSite 验证编辑路径不会把国际版
+// 站点冲成默认大陆版：product/region 是非敏感键，全对象 PUT 时必须能持久化。
+func TestAdminServiceUpdateAccount_KeepsInternationalSite(t *testing.T) {
+	account := &Account{
+		ID:       7,
+		Platform: PlatformTencentCodeBuddy,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			tencentCodeBuddyCredAccessToken: "at-existing",
+			tencentCodeBuddyCredProduct:     "codebuddy",
+			tencentCodeBuddyCredRegion:      "china",
+		},
+	}
+	repo := &accountRepoStubForBulkUpdate{getByIDAccounts: map[int64]*Account{7: account}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	updated, err := svc.UpdateAccount(context.Background(), 7, &UpdateAccountInput{
+		Credentials: map[string]any{
+			tencentCodeBuddyCredProduct: "WorkBuddy",
+			tencentCodeBuddyCredRegion:  " GLOBAL ",
+		},
+	})
+	require.NoError(t, err)
+
+	// 归一化为小写字面值并保留——这正是 WorkBuddy 国际版站点。
+	require.Equal(t, TencentCodeBuddyProductWorkBuddy, updated.Credentials[tencentCodeBuddyCredProduct])
+	require.Equal(t, TencentCodeBuddyRegionGlobal, updated.Credentials[tencentCodeBuddyCredRegion])
+	// 站点解析到 workbuddy.ai，而不是默认的 copilot.tencent.com。
+	require.Equal(t, "https://www.workbuddy.ai/v2", updated.TencentCodeBuddyBaseURL())
+	require.Len(t, repo.updatedAccounts, 1)
+}
+
 func TestAdminServiceUpdateAccount_RejectsTencentCodeBuddyBlankAccessToken(t *testing.T) {
 	account := &Account{
 		ID:          7,

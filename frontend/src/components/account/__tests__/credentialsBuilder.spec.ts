@@ -14,6 +14,9 @@ import {
   buildPlanTypeOptions,
   cloneOpenCodeGoProtocolRules,
   CODEBUDDY_DEFAULT_DOMAIN,
+  codeBuddyDefaultDomain,
+  codeBuddySiteFromKey,
+  codeBuddySiteKey,
   cnQuotaCellVisible,
   defaultCNBaseUrl,
   defaultOpenCodeProtocolRules,
@@ -583,25 +586,33 @@ describe('plan_type helpers', () => {
 // ── Tencent CodeBuddy（中国大陆版）凭据契约 ─────────────────────────
 
 describe('CodeBuddy credentials', () => {
-  it('only submits tokens and identity fields, never base_url or product/region', () => {
+  it('submits tokens, identity fields and the site, but never base_url', () => {
     const credentials = buildCodeBuddyCredentials({
       accessToken: '  at  ',
       refreshToken: ' rt ',
       userID: ' u1 ',
       enterpriseID: ' e1 ',
-      domain: ''
+      domain: '',
+      product: 'workbuddy',
+      region: 'global'
     })
 
     expect(credentials).toEqual({
       access_token: 'at',
       refresh_token: 'rt',
       uid: 'u1',
-      enterprise_id: 'e1'
+      enterprise_id: 'e1',
+      product: 'workbuddy',
+      region: 'global'
     })
-    // 上游 host 由后端固定，前端不得提交 base_url；product/region 由后端归一化。
+    // 上游 host 由后端按 product × region 固定，前端不得提交 base_url。
     expect(credentials).not.toHaveProperty('base_url')
-    expect(credentials).not.toHaveProperty('product')
-    expect(credentials).not.toHaveProperty('region')
+  })
+
+  it('defaults the site to mainland CodeBuddy when unspecified', () => {
+    const credentials = buildCodeBuddyCredentials({ accessToken: 'at' })
+    expect(credentials).toHaveProperty('product', 'codebuddy')
+    expect(credentials).toHaveProperty('region', 'china')
   })
 
   it('omits empty optional fields instead of sending blank values', () => {
@@ -612,17 +623,50 @@ describe('CodeBuddy credentials', () => {
       enterpriseID: ''
     })
 
-    expect(credentials).toEqual({ access_token: 'at' })
+    expect(credentials).toEqual({ access_token: 'at', product: 'codebuddy', region: 'china' })
   })
 
-  it('persists domain only when it differs from the default', () => {
+  it('persists domain only when it differs from the selected site default', () => {
+    // 大陆默认域：落盘会被当成显式配置，必须省略。
     expect(
       buildCodeBuddyCredentials({ accessToken: 'at', domain: CODEBUDDY_DEFAULT_DOMAIN })
     ).not.toHaveProperty('domain')
 
+    // 国际版 WorkBuddy 的默认域是 workbuddy.ai，填默认值同样省略。
+    expect(
+      buildCodeBuddyCredentials({
+        accessToken: 'at',
+        product: 'workbuddy',
+        region: 'global',
+        domain: 'www.workbuddy.ai'
+      })
+    ).not.toHaveProperty('domain')
+
+    // 偏离所选站点默认值时才提交。
     expect(
       buildCodeBuddyCredentials({ accessToken: 'at', domain: ' tenant.example.com ' })
     ).toHaveProperty('domain', 'tenant.example.com')
+    expect(
+      buildCodeBuddyCredentials({
+        accessToken: 'at',
+        product: 'workbuddy',
+        region: 'global',
+        domain: 'tenant.example.com'
+      })
+    ).toHaveProperty('domain', 'tenant.example.com')
+  })
+
+  it('resolves the site matrix and falls back to mainland CodeBuddy', () => {
+    expect(codeBuddyDefaultDomain('codebuddy', 'china')).toBe('www.codebuddy.cn')
+    expect(codeBuddyDefaultDomain('codebuddy', 'global')).toBe('www.codebuddy.ai')
+    expect(codeBuddyDefaultDomain('workbuddy', 'china')).toBe('www.workbuddy.cn')
+    expect(codeBuddyDefaultDomain('workbuddy', 'global')).toBe('www.workbuddy.ai')
+    // 未知组合回落到大陆 CodeBuddy。
+    expect(codeBuddyDefaultDomain('bogus', 'mars')).toBe('www.codebuddy.cn')
+    expect(codeBuddySiteFromKey('workbuddy/global').domain).toBe('www.workbuddy.ai')
+    expect(codeBuddySiteFromKey('bogus/mars').product).toBe('codebuddy')
+    expect(codeBuddySiteFromKey(undefined).region).toBe('china')
+    expect(codeBuddySiteKey('workbuddy', 'global')).toBe('workbuddy/global')
   })
 
   it('only recognizes codebuddy as the platform and reads back optional fields', () => {
@@ -632,6 +676,9 @@ describe('CodeBuddy credentials', () => {
     expect(readCodeBuddyCredentialField({ uid: 'u1', domain: 42 }, 'uid')).toBe('u1')
     expect(readCodeBuddyCredentialField({ domain: 42 }, 'domain')).toBe('')
     expect(readCodeBuddyCredentialField(undefined, 'refresh_token')).toBe('')
+    // 站点维度也要能回读，供编辑表单回填。
+    expect(readCodeBuddyCredentialField({ product: 'workbuddy' }, 'product')).toBe('workbuddy')
+    expect(readCodeBuddyCredentialField({ region: 7 }, 'region')).toBe('')
   })
 })
 

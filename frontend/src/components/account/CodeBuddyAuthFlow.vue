@@ -25,6 +25,36 @@
           </label>
         </div>
 
+        <!-- 站点选择：product（CodeBuddy / WorkBuddy）× region（大陆 / 国际） -->
+        <div class="mb-4">
+          <label class="mb-2 block text-sm font-medium text-sky-900 dark:text-sky-200">
+            {{ t('admin.accounts.codebuddy.site') }}
+          </label>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              v-for="option in siteOptions"
+              :key="option.key"
+              type="button"
+              class="rounded-lg border px-3 py-2 text-left transition"
+              :class="
+                siteKey === option.key
+                  ? 'border-sky-500 bg-white ring-1 ring-sky-500 dark:bg-dark-700'
+                  : 'border-sky-200 bg-white/60 hover:border-sky-400 dark:border-sky-800 dark:bg-dark-700/60'
+              "
+              :data-testid="`codebuddy-site-${option.key}`"
+              @click="siteKey = option.key"
+            >
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">
+                {{ option.label }}
+              </span>
+              <span class="block font-mono text-xs text-gray-500 dark:text-gray-400">
+                {{ option.domain }}
+              </span>
+            </button>
+          </div>
+          <p class="input-hint mt-2">{{ t('admin.accounts.codebuddy.siteHint') }}</p>
+        </div>
+
         <template v-if="mode === 'oauth'">
           <p class="mb-3 text-sm text-sky-800 dark:text-sky-300">
             {{ t('admin.accounts.codebuddy.auth.followSteps') }}
@@ -150,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import {
@@ -158,9 +188,20 @@ import {
   startCodeBuddyAuth,
   type CodeBuddyAuthCredentials
 } from '@/api/admin/accounts'
+import {
+  CODEBUDDY_SITES,
+  codeBuddySiteFromKey,
+  codeBuddySiteKey
+} from './credentialsBuilder'
 
 /** oauth = 向导式授权（推荐）；manual = 手工填写 token。 */
 const mode = defineModel<'oauth' | 'manual'>('mode', { default: 'oauth' })
+
+/**
+ * 站点选择（product × region）。由父组件持有，因为创建账号时需要写进凭据。
+ * 默认大陆 CodeBuddy，与后端归一化默认一致。
+ */
+const siteKey = defineModel<string>('siteKey', { default: codeBuddySiteKey('codebuddy', 'china') })
 
 const emit = defineEmits<{
   /** 授权成功：把凭据交给父组件填入表单（父组件是表单状态的唯一拥有者）。 */
@@ -168,6 +209,18 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const selectedSite = computed(() => codeBuddySiteFromKey(siteKey.value))
+const site = computed(() => ({ product: selectedSite.value.product, region: selectedSite.value.region }))
+
+/** 站点选项：i18n 标签 + 该站点的默认 X-Domain 提示。 */
+const siteOptions = computed(() =>
+  CODEBUDDY_SITES.map((item) => ({
+    key: codeBuddySiteKey(item.product, item.region),
+    domain: item.domain,
+    label: t(`admin.accounts.codebuddy.sites.${item.labelKey}`)
+  }))
+)
 
 const starting = ref(false)
 const authUrl = ref('')
@@ -201,7 +254,7 @@ function handleStart() {
   successText.value = ''
   pending.value = false
   copied.value = false
-  startCodeBuddyAuth()
+  startCodeBuddyAuth(site.value)
     .then((session) => {
       authUrl.value = session.auth_url
       state.value = session.state
@@ -254,7 +307,7 @@ function handlePollOnce() {
 
 async function pollOnce() {
   try {
-    const result = await pollCodeBuddyAuth(state.value)
+    const result = await pollCodeBuddyAuth(state.value, site.value)
     if (result.status !== 'ready' || !result.credentials) {
       pending.value = true
       return
@@ -293,5 +346,17 @@ async function handleCopy() {
 // 切到手工方式时停止轮询，避免后台继续打上游。
 watch(mode, (value) => {
   if (value === 'manual') stopPolling()
+})
+
+// 切换站点必须作废上一次的 state 与链接：state 是站点侧签发的，跨站轮询会
+// 打到错误的站点（或永远拿不到凭据）。同时把已填凭据告知父组件需要清空。
+watch(siteKey, () => {
+  stopPolling()
+  authUrl.value = ''
+  state.value = ''
+  pending.value = false
+  errorMessage.value = ''
+  successText.value = ''
+  copied.value = false
 })
 </script>

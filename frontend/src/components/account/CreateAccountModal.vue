@@ -239,7 +239,7 @@
             ]"
           >
             <PlatformIcon platform="codebuddy" size="sm" />
-            CodeBuddy
+            CodeBuddy / WorkBuddy
           </button>
         </div>
       </div>
@@ -545,9 +545,13 @@
         </div>
       </div>
 
-      <!-- Tencent CodeBuddy（中国大陆版）：向导式授权获取凭据，不暴露 Base URL -->
+      <!-- Tencent CodeBuddy / WorkBuddy：向导式授权获取凭据，不暴露 Base URL -->
       <div v-if="isCodeBuddyPlatform(form.platform)" class="space-y-4">
-        <CodeBuddyAuthFlow v-model:mode="codeBuddyAuthMode" @authorized="onCodeBuddyAuthorized" />
+        <CodeBuddyAuthFlow
+          v-model:mode="codeBuddyAuthMode"
+          v-model:site-key="codeBuddySiteSelection"
+          @authorized="onCodeBuddyAuthorized"
+        />
 
         <!-- 手工填写（向导的兜底路径） -->
         <template v-if="codeBuddyAuthMode === 'manual'">
@@ -597,7 +601,7 @@
               v-model="codeBuddyDomain"
               type="text"
               class="input font-mono"
-              :placeholder="CODEBUDDY_DEFAULT_DOMAIN"
+              :placeholder="codeBuddyDomainPlaceholder"
             />
             <p class="input-hint">{{ t('admin.accounts.codebuddy.domainHint') }}</p>
           </div>
@@ -4024,7 +4028,8 @@ import {
   buildCodeBuddyCredentials,
   cloneOpenCodeGoProtocolRules,
   cnSupportsNativeResponses,
-  CODEBUDDY_DEFAULT_DOMAIN,
+  codeBuddySiteFromKey,
+  codeBuddySiteKey,
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   defaultOpenCodeProtocolRules,
@@ -4234,14 +4239,20 @@ const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
-// ── Tencent CodeBuddy（中国大陆版）：只收令牌与可选身份字段，不暴露 Base URL ──
+// ── Tencent CodeBuddy / WorkBuddy：只收令牌与可选身份字段，不暴露 Base URL ──
 // authMode=oauth 走设备授权向导（推荐）；authMode=manual 走手工填写兜底。
+// 站点（product × region）决定上游 host，由向导与手工两条路径共用。
 const codeBuddyAuthMode = ref<'oauth' | 'manual'>('oauth')
+const codeBuddySiteSelection = ref(codeBuddySiteKey('codebuddy', 'china'))
 const codeBuddyAccessToken = ref('')
 const codeBuddyRefreshToken = ref('')
 const codeBuddyUserID = ref('')
 const codeBuddyEnterpriseID = ref('')
 const codeBuddyDomain = ref('')
+
+/** 当前选中的站点（product/region + 该站点默认 X-Domain）。 */
+const codeBuddySite = computed(() => codeBuddySiteFromKey(codeBuddySiteSelection.value))
+const codeBuddyDomainPlaceholder = computed(() => codeBuddySite.value.domain)
 
 /** 授权向导成功后把凭据填入表单，复用下方同一条提交路径。 */
 function onCodeBuddyAuthorized(credentials: {
@@ -4398,6 +4409,7 @@ function selectCodeBuddyPlatform() {
 
 function resetCodeBuddyForm() {
   codeBuddyAuthMode.value = 'oauth'
+  codeBuddySiteSelection.value = codeBuddySiteKey('codebuddy', 'china')
   codeBuddyAccessToken.value = ''
   codeBuddyRefreshToken.value = ''
   codeBuddyUserID.value = ''
@@ -5895,8 +5907,9 @@ const handleSubmit = async () => {
     return
   }
 
-  // Tencent CodeBuddy（中国大陆版）：只提交令牌与可选身份字段。上游 host 与 X-Domain
-  // 由后端固定，前端不接受 base_url，也不使用通用 API Key（apiKeyValue）字段。
+  // Tencent CodeBuddy / WorkBuddy：只提交令牌、站点维度与可选身份字段。上游 host 与
+  // X-Domain 由后端按 product × region 固定，前端不接受 base_url，也不使用通用
+  // API Key（apiKeyValue）字段。
   if (isCodeBuddyPlatform(form.platform)) {
     if (!form.name.trim()) {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
@@ -5911,7 +5924,9 @@ const handleSubmit = async () => {
       refreshToken: codeBuddyRefreshToken.value,
       userID: codeBuddyUserID.value,
       enterpriseID: codeBuddyEnterpriseID.value,
-      domain: codeBuddyDomain.value
+      domain: codeBuddyDomain.value,
+      product: codeBuddySite.value.product,
+      region: codeBuddySite.value.region
     })
     const codeBuddyModelMapping = buildModelMappingObject(
       modelRestrictionMode.value,

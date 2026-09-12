@@ -21,7 +21,7 @@ export const CONCRETE_PLATFORM_OPTIONS = [
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'minimax', label: 'MiniMax' },
   { value: 'opencode_go', label: 'OpenCode' },
-  { value: 'codebuddy', label: 'CodeBuddy' }
+  { value: 'codebuddy', label: 'CodeBuddy / WorkBuddy' }
 ] as const satisfies readonly PlatformOption<AccountPlatform>[]
 
 /** Platforms that can own a group. */

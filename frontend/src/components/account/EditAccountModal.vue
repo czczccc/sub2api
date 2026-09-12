@@ -76,8 +76,30 @@
             {{ t('admin.accounts.cnProviders.apiProtocol.responsesFallbackDesc') }}
           </p>
         </div>
-        <!-- Tencent CodeBuddy（中国大陆版）凭据：不暴露 Base URL -->
+        <!-- Tencent CodeBuddy / WorkBuddy 凭据：不暴露 Base URL -->
         <template v-if="isCodeBuddyAccount">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.codebuddy.site') }}</label>
+            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                v-for="option in codeBuddySiteOptions"
+                :key="option.key"
+                type="button"
+                class="rounded-lg border px-3 py-2 text-left transition"
+                :class="
+                  editCodeBuddySiteSelection === option.key
+                    ? 'border-sky-500 bg-white ring-1 ring-sky-500 dark:bg-dark-700'
+                    : 'border-gray-200 bg-white/60 hover:border-sky-400 dark:border-dark-600 dark:bg-dark-700/60'
+                "
+                :data-testid="`edit-codebuddy-site-${option.key}`"
+                @click="editCodeBuddySiteSelection = option.key"
+              >
+                <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ option.label }}</span>
+                <span class="block font-mono text-xs text-gray-500 dark:text-gray-400">{{ option.domain }}</span>
+              </button>
+            </div>
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.siteHint') }}</p>
+          </div>
           <div>
             <label class="input-label">{{ t('admin.accounts.codebuddy.accessToken') }}</label>
             <input
@@ -115,7 +137,7 @@
           </div>
           <div>
             <label class="input-label">{{ t('admin.accounts.codebuddy.domain') }}</label>
-            <input v-model="editCodeBuddyDomain" type="text" class="input font-mono" :placeholder="CODEBUDDY_DEFAULT_DOMAIN" />
+            <input v-model="editCodeBuddyDomain" type="text" class="input font-mono" :placeholder="editCodeBuddyDomainPlaceholder" />
             <p class="input-hint">{{ t('admin.accounts.codebuddy.domainHint') }}</p>
           </div>
           <p class="input-hint">{{ t('admin.accounts.codebuddy.hint') }}</p>
@@ -3123,7 +3145,9 @@ import {
   isCodeBuddyPlatform,
   readCodeBuddyCredentialField,
   supportsUpstreamBillingProbe,
-  CODEBUDDY_DEFAULT_DOMAIN,
+  CODEBUDDY_SITES,
+  codeBuddySiteFromKey,
+  codeBuddySiteKey,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
   HEADER_OVERRIDES_CREDENTIAL_KEY,
   type CnAccountMode,
@@ -3232,13 +3256,26 @@ const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
 
-// ── Tencent CodeBuddy（中国大陆版）：只编辑令牌与可选身份字段，不暴露 Base URL ──
+// ── Tencent CodeBuddy / WorkBuddy：只编辑令牌、站点与可选身份字段，不暴露 Base URL ──
+// 站点必须可改：早期账号一律是大陆 CodeBuddy，用户可能需要改成国际版。
 const editCodeBuddyAccessToken = ref('')
 const editCodeBuddyRefreshToken = ref('')
 const editCodeBuddyUserID = ref('')
 const editCodeBuddyEnterpriseID = ref('')
 const editCodeBuddyDomain = ref('')
+const editCodeBuddySiteSelection = ref(codeBuddySiteKey('codebuddy', 'china'))
 const isCodeBuddyAccount = computed(() => isCodeBuddyPlatform(props.account?.platform ?? ''))
+
+/** 当前编辑中的站点（product/region + 默认 X-Domain）。 */
+const editCodeBuddySite = computed(() => codeBuddySiteFromKey(editCodeBuddySiteSelection.value))
+const editCodeBuddyDomainPlaceholder = computed(() => editCodeBuddySite.value.domain)
+const codeBuddySiteOptions = computed(() =>
+  CODEBUDDY_SITES.map((item) => ({
+    key: codeBuddySiteKey(item.product, item.region),
+    domain: item.domain,
+    label: t(`admin.accounts.codebuddy.sites.${item.labelKey}`)
+  }))
+)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）account_mode / api_protocol 编辑 ──
 // account_mode 决定额度/余额监控路径，api_protocol 决定转发端点与格式；
@@ -4319,7 +4356,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules(editOpenCodeAccountMode.value))
       }
     }
-    // Tencent CodeBuddy（中国大陆版）：回填非敏感的身份字段。
+    // Tencent CodeBuddy / WorkBuddy：回填非敏感的身份字段与站点维度。
     // 必须留在 isCNProviderPlatform 分支之外——CodeBuddy 不是国产供应商平台，
     // 放进那个分支会让回填永远不执行（编辑弹窗看似"空表单"）。
     if (isCodeBuddyPlatform(newAccount.platform)) {
@@ -4329,6 +4366,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       editCodeBuddyUserID.value = readCodeBuddyCredentialField(credentials, 'uid')
       editCodeBuddyEnterpriseID.value = readCodeBuddyCredentialField(credentials, 'enterprise_id')
       editCodeBuddyDomain.value = readCodeBuddyCredentialField(credentials, 'domain')
+      // 站点回填：缺失 product/region 的存量账号即大陆 CodeBuddy（历史默认）。
+      editCodeBuddySiteSelection.value = codeBuddySiteKey(
+        readCodeBuddyCredentialField(credentials, 'product') || 'codebuddy',
+        readCodeBuddyCredentialField(credentials, 'region') || 'china'
+      )
     }
     const platformDefaultUrl =
       newAccount.platform === 'openai'
@@ -4434,15 +4476,16 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
-  // CodeBuddy 的身份字段（uid / enterprise_id / domain）由上面 isCodeBuddyPlatform 分支
-  // 回填，这里不能再无条件清空——否则刚填好的值会被就地抹掉（编辑弹窗看似"啥也没有"）。
-  // 只在切换到非 CodeBuddy 账号时清理上一个账号的残留。
+  // CodeBuddy 的身份字段（uid / enterprise_id / domain / product / region）由上面
+  // isCodeBuddyPlatform 分支回填，这里不能再无条件清空——否则刚填好的值会被就地抹掉
+  // （编辑弹窗看似"啥也没有"）。只在切换到非 CodeBuddy 账号时清理上一个账号的残留。
   if (!isCodeBuddyPlatform(newAccount.platform)) {
     editCodeBuddyAccessToken.value = ''
     editCodeBuddyRefreshToken.value = ''
     editCodeBuddyUserID.value = ''
     editCodeBuddyEnterpriseID.value = ''
     editCodeBuddyDomain.value = ''
+    editCodeBuddySiteSelection.value = codeBuddySiteKey('codebuddy', 'china')
   }
 }
 
@@ -5098,7 +5141,11 @@ const handleSubmit = async () => {
         if (enterpriseID) newCredentials.enterprise_id = enterpriseID
         else delete newCredentials.enterprise_id
         const domain = editCodeBuddyDomain.value.trim()
-        if (domain && domain !== CODEBUDDY_DEFAULT_DOMAIN) newCredentials.domain = domain
+        // 站点维度必须写回：它决定账号打哪个上游，缺失会让国际版账号回落大陆站。
+        newCredentials.product = editCodeBuddySite.value.product
+        newCredentials.region = editCodeBuddySite.value.region
+        // domain 只在偏离该站点默认值时才落盘，避免把默认值固化成显式配置。
+        if (domain && domain !== editCodeBuddySite.value.domain) newCredentials.domain = domain
         else delete newCredentials.domain
       }
 

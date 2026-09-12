@@ -312,9 +312,17 @@ export default {
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
-        codebuddy: 'CodeBuddy',
+        codebuddy: 'CodeBuddy / WorkBuddy',
       },
       codebuddy: {
+        site: '站点',
+        siteHint: '决定账号接入哪个上游站点；切换站点会作废已生成的授权链接。',
+        sites: {
+          codebuddy: 'CodeBuddy 中国大陆',
+          codebuddyIntl: 'CodeBuddy 国际版',
+          workbuddy: 'WorkBuddy 中国大陆',
+          workbuddyIntl: 'WorkBuddy 国际版（workbuddy.ai）'
+        },
         auth: {
           title: 'CodeBuddy 授权',
           methodOAuth: '一键授权（推荐）',
@@ -350,9 +358,9 @@ export default {
         userID: '用户 ID（可选）',
         enterpriseID: '企业 ID（可选）',
         domain: 'Domain（可选）',
-        domainHint: '默认 www.codebuddy.cn；仅在账号所属域不同时填写。',
+        domainHint: '留空即使用所选站点的默认域（如 www.workbuddy.ai）；仅在账号所属域不同时填写。',
         optional: '可选',
-        hint: '上游地址由系统固定为中国大陆版（copilot.tencent.com），无需填写 Base URL。'
+        hint: '上游地址由系统按所选站点固定（CodeBuddy / WorkBuddy × 大陆 / 国际），无需填写 Base URL。'
       },
       cnProviders: {
         accountMode: {

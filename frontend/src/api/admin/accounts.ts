@@ -668,6 +668,9 @@ export interface CodeBuddyAuthCredentials {
   uid?: string
   enterprise_id?: string
   domain?: string
+  /** 服务端按请求维度写入，前端只回传不推导。 */
+  product?: string
+  region?: string
 }
 
 export interface CodeBuddyAuthPollResult {
@@ -677,9 +680,23 @@ export interface CodeBuddyAuthPollResult {
   nickname?: string
 }
 
-/** 生成 CodeBuddy 授权链接（向导第一步）。 */
-export async function startCodeBuddyAuth(): Promise<CodeBuddyAuthSession> {
-  const { data } = await apiClient.post<CodeBuddyAuthSession>('/admin/accounts/codebuddy/auth/state')
+/** 站点维度：CodeBuddy/WorkBuddy × 大陆/国际。 */
+export interface CodeBuddySiteSelection {
+  product: string
+  region: string
+}
+
+/**
+ * 生成 CodeBuddy 授权链接（向导第一步）。
+ *
+ * product / region 决定授权链接落在哪个站点，轮询必须传同一组取值。
+ */
+export async function startCodeBuddyAuth(
+  site?: CodeBuddySiteSelection
+): Promise<CodeBuddyAuthSession> {
+  const { data } = await apiClient.post<CodeBuddyAuthSession>('/admin/accounts/codebuddy/auth/state', null, {
+    params: site ? { product: site.product, region: site.region } : undefined
+  })
   return data
 }
 
@@ -687,9 +704,12 @@ export async function startCodeBuddyAuth(): Promise<CodeBuddyAuthSession> {
  * 轮询 CodeBuddy 授权结果。
  * 未完成登录时后端返回 200 + status=pending，调用方应继续轮询而不是报错。
  */
-export async function pollCodeBuddyAuth(state: string): Promise<CodeBuddyAuthPollResult> {
+export async function pollCodeBuddyAuth(
+  state: string,
+  site?: CodeBuddySiteSelection
+): Promise<CodeBuddyAuthPollResult> {
   const { data } = await apiClient.get<CodeBuddyAuthPollResult>('/admin/accounts/codebuddy/auth/poll', {
-    params: { state }
+    params: site ? { state, product: site.product, region: site.region } : { state }
   })
   return data
 }

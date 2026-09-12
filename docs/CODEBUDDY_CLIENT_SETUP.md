@@ -12,6 +12,12 @@
 
 实测日期：**2026-09-12**，账号为真实腾讯 CodeBuddy 订阅，模型目录为当期 15 个模型。
 
+> **国际版（WorkBuddy）**：`codebuddy` 平台账号现在支持 4 个站点
+> （CodeBuddy / WorkBuddy × 大陆 / 国际），选站方式见第 9 节。第 1–8 节的能力结论
+> 是在**大陆 CodeBuddy**（`copilot.tencent.com`）上实测的。国际版（`www.workbuddy.ai`）
+> 已于 2026-09-12 用真实账号验证：**聊天链路可用，但模型目录与大陆站不重合**，
+> 详见第 9.3 节。
+
 ---
 
 ## 1. 实测能力（服务端视角）
@@ -308,3 +314,168 @@ curl -sS http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $SUB2API_KEY"
 | 图片 URL 抓取失败 = 400 | 上游自己去下载外链，抓不到就报错；内联 base64 不受影响 |
 | 上下文窗口靠人工 | 上游与公共注册表都没有数据，需在「模型能力」里手工声明 |
 | 能力字段是"广告" | Sub2API 只声明，不做请求侧校验；声明错了不会拦请求，只会误导客户端 |
+| 两站点目录不重合 | 大陆 15 个、国际 18 个，交集有限（GPT/Gemini 系列只有国际有，`deepseek-v4-pro` 等只有大陆有）。模型名不通用，用错站点返回 `11102`。见第 9.3.2 节 |
+| 目录随套餐变化 | `data.models` 与 `data.modelPromotions` 由服务端下发（含促销与倍率），因此静态兜底只是快照，运行时以实时目录为准 |
+
+---
+
+## 9. 站点矩阵（CodeBuddy / WorkBuddy × 大陆 / 国际）
+
+`codebuddy` 平台账号带两个维度：`product`（品牌）与 `region`（区域），
+组合决定上游站点。四个 host 均已实测可达（`/v3/config` 200、`/v2/chat/completions` 401）。
+
+| product | region | 上游 host（API root = host + `/v2`） | 默认 X-Domain | 备注 |
+|---|---|---|---|---|
+| `codebuddy` | `china` | `https://copilot.tencent.com` | `www.codebuddy.cn` | 历史默认；本文第 1–8 节的实测环境 |
+| `codebuddy` | `global` | `https://www.codebuddy.ai` | `www.codebuddy.ai` | CodeBuddy 国际版 |
+| `workbuddy` | `china` | `https://www.workbuddy.cn` | `www.workbuddy.cn` | WorkBuddy 大陆版 |
+| `workbuddy` | `global` | `https://www.workbuddy.ai` | `www.workbuddy.ai` | **WorkBuddy 国际版**（用户目标站点） |
+
+四个站点的**路径完全一致**（`/v2/chat/completions`、`/v2/plugin/auth/state`、
+`/v2/plugin/auth/token`、`/v2/plugin/auth/token/refresh`、`/v2/plugin/login/account`、
+`/v3/config`、`/console/enterprises/personal/models`），只有 host 与 `X-Domain` 不同。
+
+### 9.1 怎么选站
+
+「添加账号」→ 选 **CodeBuddy / WorkBuddy** 平台 → 表单顶部的「站点」二选一网格里点选
+（4 个站点）。选好后「生成授权链接」得到的 `authUrl` 由该站点自行派生，因此**登录页
+自动就是对的站点**，不需要额外参数。切换站点会作废已生成的链接与 `state`
+（`state` 是站点侧签发的，跨站轮询拿不到凭据）。
+
+手工填写路径共享同一个站点选择器——`product` / `region` 是前端必须显式提交的字段，
+后端无法从令牌本身可靠推断。
+
+### 9.2 账号级 `domain` 与站点默认值
+
+`credentials.domain` 只影响 `X-Domain` 头，**不改变 host**。它对应官方登录态里的
+`auth.domain`：留空即用所选站点的默认域；仅当账号确实属于别的域时才填。
+把默认值落盘会让它固化成显式配置，之后用户改了站点，`X-Domain` 不会跟随——
+因此 `domain` 等于站点默认值时会被有意丢弃。
+
+### 9.3 国际版实测（2026-09-12，真实 workbuddy.ai 订阅账号）
+
+以下结论用账号的 `access_token` 直接打 `https://www.workbuddy.ai` 逐项验证过。
+
+#### 9.3.1 目录接口的正解是 `/v2/enterprises/personal/models`
+
+**踩过的坑（曾据此写出错误结论，特此更正）**：早期实现（含参考项目
+`Sliverkiss/workbuddy2api`）用的是 `GET {host}/console/enterprises/personal/models`。
+它在大陆站可用，但在 `www.workbuddy.ai` 上**带令牌恒返回 APISIX 原始 500**
+（HTML 500，不是 `{code,msg,data}` 业务信封），且与 UA 无关；无令牌时四个站点都返回
+302（网页控制台路由）。当时误判为"国际站没有目录接口"，于是退化成静态清单——
+而那份清单是拿**大陆站模型名**逐个试探出来的，**完全漏掉了国际站真实目录**。
+
+正解来自官方客户端本体（`WorkBuddy/resources/app.asar` 里
+`daemon.cloudAgent` 的 `listAvailableModels`）：
+
+```
+GET {endpoint}/v2/enterprises/personal/models
+```
+
+实测：该路径在大陆与国际站点都稳定返回 **401**（未带令牌），是行为一致的 API 路由。
+用真实账号打通后返回 **200 + 18 个模型**，且响应里的 `data.models[].credits`
+就是客户端选择器显示的倍率（`glm-5.3` → `x0.79`、`gpt-5.6-sol` → `x3.47`），
+`data.modelPromotions` 是 "Free now" 角标的来源。**这份列表与用户截图完全对上。**
+
+因此实现改为：主路径 `/v2/enterprises/personal/models`，失败再回退老路径
+`/console/enterprises/personal/models`；令牌失效（401/403）不再换路径重试——
+那说明凭据有问题，换路径也一样，只会把一次明确的鉴权错误拖成两次往返。
+
+> 教训：**不要拿另一个站点的模型名去"探测"本站点的目录**。清单要么来自实时接口，
+> 要么来自官方客户端源码，不要靠猜。
+
+#### 9.3.2 两个站点的模型目录不重合
+
+国际版（`www.workbuddy.ai`，真实账号实测，共 18 个）：
+
+| ID | 名称 | credits |
+|---|---|---|
+| `default-model` | Auto（默认） | x0.79 |
+| `fast-model` | Fast | x0.34 |
+| `balanced-model` | Balanced | x0.59 |
+| `primary-model` | Primary | x3.31 |
+| `deep-model` | Deep | x3.33 |
+| `hy4-preview` | Hy4 preview | x0.00 |
+| `hy3` | Hy3 | x0.00 |
+| `gpt-5.6-sol` | GPT-5.6-Sol | x3.47 |
+| `gpt-5.6-terra` | GPT-5.6-Terra | x1.39 |
+| `gpt-5.6-luna` | GPT-5.6-Luna | x0.14 |
+| `gpt-5.5` | GPT-5.5 | x3.31 |
+| `gpt-5.4` | GPT-5.4 | x1.65 |
+| `gpt-5.3-codex` | GPT-5.3-Codex | x1.25 |
+| `gemini-3.5-flash` | Gemini-3.5-Flash | x0.99 |
+| `glm-5.3` | GLM-5.3 | x0.79 |
+| `glm-5.2` | GLM-5.2 | x0.79 |
+| `kimi-k3` | Kimi-K3 | x1.62 |
+| `kimi-k2.6` | Kimi-K2.6 | x0.52 |
+
+`default-model` / `fast-model` / `balanced-model` / `primary-model` / `deep-model` 是
+**路由别名**（服务端按档位选真实模型），不是具体厂商模型。
+
+与大陆站（`data.agents[cli].models`，15 个：`auto` `hy4-preview` `hy3` `hy3-x`
+`deepseek-v4.1-flash` `deepseek-v4-pro` `glm-5.3` `glm-5.3-flash` `glm-5.2` `glm-5.1`
+`glm-5v-turbo` `kimi-k3-1` `kimi-k2.7` `kimi-k2.6` `minimax-m3`）**不重合**：
+`hy3-x` / `deepseek-v4-pro` / `glm-5.3-flash` / `kimi-k3-1` 只有大陆有，
+GPT 与 Gemini 系列只有国际有。**用错站点的模型名会拿到
+`11102 model [x] service info not found`**。
+
+> 注意：目录**随账号/套餐/时间变化**（促销与可用模型由服务端下发），所以静态兜底
+> 只是快照，运行时永远以实时目录为准。
+
+#### 9.3.3 频率限制是 `code 6004`，不是鉴权失败
+
+```json
+{"code":6004,"msg":"usage exceeds frequency limit, ... your usage will reset at <时间>, alternatively, you can switch to the other models to continue using it."}
+```
+
+额度触顶时上游返回 **HTTP 429 + code 6004**，并给出重置时间。Sub2API 会把它当作普通
+429 做故障转移，最终可能表现为 `no available accounts supporting model`（池被排除空）
+——这**不是**域名或令牌错误。换一个模型即可继续。
+
+另注：**可调用集合可能大于目录列表**。例如 `deepseek-v4.1-flash` 不在上述 18 项里，
+但直接调用是成功的（返回 6004 限流而非 11102 不存在）。
+
+#### 9.3.4 `/v3/config` 要求 `CodeBuddy/<version>` 形式的 UA
+
+`GET /v3/config` 在 UA 不含 `CodeBuddy/<版本>` 时返回 `12403 check ua, get coding
+copilot version error`；换成 `CodeBuddy/1.0.0` 即 200。注意该接口**不返回模型列表**
+（`data.models` 为 `null`，只有 `enterpriseId` / `productFeatures*`），因此不能用它
+替代目录接口。当前客户端固定使用 `codebuddy2openai/2.0`（参考实现已验证可用），
+不受此约束影响。
+
+### 9.4 仍未验证的部分（如实记录）
+
+- **国际版的图片 / `reasoning_effort` 能力**：未逐项复测，第 1–8 节结论只对大陆
+  CodeBuddy 有实测依据。国际站目录里 `data.models[].supportsImages` 全为 `true`，
+  但那是上游声明，未实测。
+- **`codebuddy × global`（www.codebuddy.ai）**：没有该站点的账号，未验证其目录接口
+  是否可用；新路径在两站点都返回 401（路由存在），大概率可用但未证实。
+- **`gpt-6-astra`**：用户客户端截图里出现过，但当前账号的目录与可调用集合里都没有，
+  未确认它对哪些套餐开放。
+
+### 9.5 自查命令
+
+```bash
+# 站点是否活着（未带凭据应为 200 + data.models 可能为 null）
+for host in copilot.tencent.com www.codebuddy.ai www.workbuddy.cn www.workbuddy.ai; do
+  printf '%-22s ' "$host"
+  curl -s -o /dev/null -w '%{http_code}\n' "https://$host/v3/config"
+done
+
+# 授权链接是否落在指定站点（authUrl 的 host 应与请求 host 一致）
+curl -sS -X POST 'https://www.workbuddy.ai/v2/plugin/auth/state?platform=CLI' | head -c 300
+
+# 用账号令牌验证国际站模型是否可用（$AT / $UID 从账号凭据取）
+#   200 / 6004 => 模型存在；11102 => 该站点没有这个模型
+curl -sS -N https://www.workbuddy.ai/v2/chat/completions \
+  -H "Authorization: Bearer $AT" -H "User-Agent: CodeBuddy/1.0.0" \
+  -H "X-Domain: www.workbuddy.ai" -H "X-User-Id: $UID" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-v3","stream":true,"messages":[
+        {"role":"system","content":"You are helpful."},
+        {"role":"user","content":"hi"}]}'
+```
+
+> ⚠️ 第一条消息必须是 `system`：否则上游返回
+> `11128 first message is not system prompt`（大陆/国际一致）。
+

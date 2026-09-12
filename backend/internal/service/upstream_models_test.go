@@ -1225,7 +1225,8 @@ func TestFetchUpstreamSupportedModelsUsesCodeBuddyDedicatedEndpoint(t *testing.T
 
 	require.Len(t, upstream.requests, 1)
 	req := upstream.requests[0]
-	require.Equal(t, "https://copilot.tencent.com/console/enterprises/personal/models", req.URL.String())
+	// 主路径是官方客户端使用的 /v2/enterprises/personal/models。
+	require.Equal(t, "https://copilot.tencent.com/v2/enterprises/personal/models", req.URL.String())
 	require.Equal(t, http.MethodGet, req.Method)
 	require.Equal(t, "Bearer cb-access-token", req.Header.Get("Authorization"))
 	require.Equal(t, "www.codebuddy.cn", req.Header.Get("X-Domain"))

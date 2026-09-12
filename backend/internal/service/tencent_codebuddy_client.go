@@ -186,6 +186,13 @@ func (c *TencentCodeBuddyClient) FetchModels(ctx context.Context, account *Accou
 
 // fetchModels 是 FetchModels 的状态码感知版本：额外返回上游 HTTP 状态码（出错时
 // 为 0），供需要区分"令牌失效(401/403)"与"上游故障"的调用方使用。
+//
+// 站点差异：目录接口有两个路径，先打官方客户端使用的 /v2/enterprises/personal/models，
+// 失败再回退参考实现的老路径 /console/enterprises/personal/models。国际站
+// （www.workbuddy.ai）只有前者可用——后者带令牌恒返回 APISIX 原始 500。
+//
+// 令牌失效（401/403）不再尝试第二个路径：那说明凭据有问题，换路径也是一样的结果，
+// 还会把一次明确的鉴权错误拖成两次往返。
 func (c *TencentCodeBuddyClient) fetchModels(ctx context.Context, account *Account) ([]string, int, error) {
 	if err := c.requireAccount(account); err != nil {
 		return nil, 0, err
@@ -195,8 +202,36 @@ func (c *TencentCodeBuddyClient) fetchModels(ctx context.Context, account *Accou
 		return nil, 0, infraerrors.New(http.StatusBadRequest, "TENCENT_CODEBUDDY_MISSING_ACCESS_TOKEN",
 			"credentials.access_token is required")
 	}
-	// 模型目录挂在 host 根，不在 /v2 下。
-	url := strings.TrimRight(tencentCodeBuddyAPIHost, "/") + tencentCodeBuddyModelsPath
+	// 模型目录挂在站点根（不是 /v2 之外的某个前缀），因此用 Host（不含 /v2）而非
+	// BaseURL；且必须按凭据的 product × region 取站点，否则国际版账号会打到大陆站。
+	host := strings.TrimRight(cred.Endpoint().Host, "/")
+
+	models, status, err := c.fetchModelsAt(ctx, account, cred, host+tencentCodeBuddyModelsPath)
+	if err == nil && len(models) > 0 {
+		return models, status, nil
+	}
+	if tencentCodeBuddyTokenExpiredStatus(status) {
+		return models, status, err
+	}
+
+	legacyModels, legacyStatus, legacyErr := c.fetchModelsAt(ctx, account, cred, host+tencentCodeBuddyModelsPathLegacy)
+	if legacyErr == nil && len(legacyModels) > 0 {
+		return legacyModels, legacyStatus, nil
+	}
+	if legacyErr != nil {
+		// 两个路径都失败：上报兜底路径的错误（含状态码），让同步层能正确分类。
+		return legacyModels, legacyStatus, legacyErr
+	}
+	return models, status, err
+}
+
+// fetchModelsAt 打一次目录接口并解析。path 必须是 host 根下的绝对路径。
+func (c *TencentCodeBuddyClient) fetchModelsAt(
+	ctx context.Context,
+	account *Account,
+	cred TencentCodeBuddyCredential,
+	url string,
+) ([]string, int, error) {
 	resp, err := c.do(ctx, account, cred, http.MethodGet, url, nil, false, nil)
 	if err != nil {
 		return nil, 0, err
@@ -391,8 +426,12 @@ func (c *TencentCodeBuddyClient) publicJSON(
 
 // StartAuthSession 申请一次设备授权：POST {root}/plugin/auth/state?platform=CLI。
 // 返回的 AuthURL 需由用户在浏览器打开并完成登录，State 用于后续轮询。
-func (c *TencentCodeBuddyClient) StartAuthSession(ctx context.Context) (TencentCodeBuddyAuthSession, error) {
-	url := tencentCodeBuddyAPIRoot + tencentCodeBuddyAuthStatePath + "?platform=" + tencentCodeBuddyAuthPlatform
+//
+// product / region 决定请求落到哪个站点（见 ResolveTencentCodeBuddyEndpoint）。
+// 上游返回的 authUrl 由该站点自身派生，因此选对站点就不会串站。
+func (c *TencentCodeBuddyClient) StartAuthSession(ctx context.Context, product, region string) (TencentCodeBuddyAuthSession, error) {
+	endpoint := ResolveTencentCodeBuddyEndpoint(product, region)
+	url := endpoint.BaseURL + tencentCodeBuddyAuthStatePath + "?platform=" + tencentCodeBuddyAuthPlatform
 	envelope, err := c.publicJSON(ctx, http.MethodPost, url, []byte("{}"), nil)
 	if err != nil {
 		return TencentCodeBuddyAuthSession{}, err
@@ -423,16 +462,20 @@ func (c *TencentCodeBuddyClient) StartAuthSession(ctx context.Context) (TencentC
 // 上游契约：/plugin/auth/token?state= 是权威登录状态端点，未完成时业务 code != 0
 // （实测 code=11217 "login ing..."）；完成后 code=0 + token bundle。
 // uid / enterpriseId / nickname 来自 /plugin/login/account?state=（best-effort，失败不影响凭据可用）。
-func (c *TencentCodeBuddyClient) PollAuthSession(ctx context.Context, state string) (TencentCodeBuddyAuthResult, error) {
+//
+// product / region 必须与 StartAuthSession 一致：轮询与换取凭据打的是同一个站点，
+// 且写回的凭据要带上这两个维度，否则账号会落到默认站点。
+func (c *TencentCodeBuddyClient) PollAuthSession(ctx context.Context, state, product, region string) (TencentCodeBuddyAuthResult, error) {
 	state = strings.TrimSpace(state)
 	if state == "" {
 		return TencentCodeBuddyAuthResult{}, infraerrors.New(http.StatusBadRequest,
 			"TENCENT_CODEBUDDY_AUTH_MISSING_STATE", "state is required")
 	}
 	escaped := url.QueryEscape(state)
+	endpoint := ResolveTencentCodeBuddyEndpoint(product, region)
 
 	envelope, err := c.publicJSON(ctx, http.MethodGet,
-		tencentCodeBuddyAPIRoot+tencentCodeBuddyAuthTokenPath+"?state="+escaped, nil, nil)
+		endpoint.BaseURL+tencentCodeBuddyAuthTokenPath+"?state="+escaped, nil, nil)
 	if err != nil {
 		return TencentCodeBuddyAuthResult{}, err
 	}
@@ -458,8 +501,8 @@ func (c *TencentCodeBuddyClient) PollAuthSession(ctx context.Context, state stri
 		Credential: TencentCodeBuddyCredential{
 			AccessToken:  accessToken,
 			RefreshToken: strings.TrimSpace(token.RefreshToken),
-			Product:      TencentCodeBuddyProductCodeBuddy,
-			Region:       TencentCodeBuddyRegionChina,
+			Product:      endpoint.Product,
+			Region:       endpoint.Region,
 		},
 	}
 	if token.ExpiresIn > 0 {
@@ -471,7 +514,7 @@ func (c *TencentCodeBuddyClient) PollAuthSession(ctx context.Context, state stri
 	}
 
 	accountEnvelope, acctErr := c.publicJSON(ctx, http.MethodGet,
-		tencentCodeBuddyAPIRoot+tencentCodeBuddyLoginAccountPath+"?state="+escaped, nil,
+		endpoint.BaseURL+tencentCodeBuddyLoginAccountPath+"?state="+escaped, nil,
 		map[string]string{"Authorization": "Bearer " + accessToken})
 	if acctErr == nil && accountEnvelope.Code == 0 {
 		var account struct {

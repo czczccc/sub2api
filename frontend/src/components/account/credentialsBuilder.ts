@@ -284,10 +284,68 @@ export function isOpenCodeGoPlatform(platform: string): boolean {
   return platform === 'opencode_go'
 }
 
-// ── Tencent CodeBuddy（中国大陆版） ──────────────────────────────────
+// ── Tencent CodeBuddy / WorkBuddy ────────────────────────────────────
+//
+// 站点由 product（品牌）× region（区域）共同决定，与后端
+// `ResolveTencentCodeBuddyEndpoint` 的矩阵一一对应。四个 host 均已实测存在。
 
-/** X-Domain 默认值，与后端 tencentCodeBuddyDomain 保持一致。 */
+/** X-Domain 默认值（大陆 CodeBuddy），与后端 tencentCodeBuddyDomain 保持一致。 */
 export const CODEBUDDY_DEFAULT_DOMAIN = 'www.codebuddy.cn'
+
+export type CodeBuddyProduct = 'codebuddy' | 'workbuddy'
+export type CodeBuddyRegion = 'china' | 'global'
+
+/** 默认站点：大陆 CodeBuddy（与后端归一化默认一致）。 */
+export const CODEBUDDY_DEFAULT_PRODUCT: CodeBuddyProduct = 'codebuddy'
+export const CODEBUDDY_DEFAULT_REGION: CodeBuddyRegion = 'china'
+
+interface CodeBuddySite {
+  product: CodeBuddyProduct
+  region: CodeBuddyRegion
+  /** X-Domain 默认值。 */
+  domain: string
+  /** UI 标签的 i18n key 后缀。 */
+  labelKey: 'codebuddy' | 'codebuddyIntl' | 'workbuddy' | 'workbuddyIntl'
+}
+
+/**
+ * product × region 站点矩阵，与后端 `tencentCodeBuddySites` 逐项对应。
+ *
+ * WorkBuddy 与 CodeBuddy 是不同产品线，大陆与国际是不同站点，不能只按 region 推导
+ * （workbuddy/cn 的 host 是 www.workbuddy.cn，而非 copilot.tencent.com）。
+ * 四个 host 均已实测存在。
+ */
+export const CODEBUDDY_SITES: readonly CodeBuddySite[] = [
+  { product: 'codebuddy', region: 'china', domain: 'www.codebuddy.cn', labelKey: 'codebuddy' },
+  { product: 'codebuddy', region: 'global', domain: 'www.codebuddy.ai', labelKey: 'codebuddyIntl' },
+  { product: 'workbuddy', region: 'china', domain: 'www.workbuddy.cn', labelKey: 'workbuddy' },
+  { product: 'workbuddy', region: 'global', domain: 'www.workbuddy.ai', labelKey: 'workbuddyIntl' }
+] as const
+
+/** 站点在 UI 中的唯一标识（用于 v-model）。 */
+export function codeBuddySiteKey(product: string, region: string): string {
+  return `${product}/${region}`
+}
+
+/** 按 product / region 取站点；未知组合回落到大陆 CodeBuddy。 */
+export function codeBuddySite(
+  product: string | undefined,
+  region: string | undefined
+): CodeBuddySite {
+  const found = CODEBUDDY_SITES.find((site) => site.product === product && site.region === region)
+  return found ?? CODEBUDDY_SITES[0]
+}
+
+/** 由 UI 标识解析回站点；未知标识回落到大陆 CodeBuddy。 */
+export function codeBuddySiteFromKey(key: string | undefined): CodeBuddySite {
+  const [product, region] = (key ?? '').split('/')
+  return codeBuddySite(product, region)
+}
+
+/** 按 product / region 取该站点的 X-Domain 默认值。 */
+export function codeBuddyDefaultDomain(product?: string, region?: string): string {
+  return codeBuddySite(product, region).domain
+}
 
 export function isCodeBuddyPlatform(platform: string): boolean {
   return platform === 'codebuddy'
@@ -299,20 +357,25 @@ export interface CodeBuddyCredentialInput {
   userID?: string
   enterpriseID?: string
   domain?: string
+  product?: string
+  region?: string
 }
 
 /**
  * 组装 CodeBuddy 账号凭据。
  *
- * 上游 host 与 X-Domain 由后端固定为大陆版（copilot.tencent.com / www.codebuddy.cn），
- * 前端不提交 base_url；只提交令牌与可选身份字段。product / region 由后端归一化写入，
- * 并受 DB CHECK 约束保护，前端不参与。
+ * 上游 host 由后端按 product × region 固定，前端不提交 base_url；
+ * 但 product / region 必须由前端显式提交——它们决定账号属于哪个站点，
+ * 后端无法从令牌本身可靠推断。
  *
- * domain 只在偏离默认值时才提交：把默认值落盘会让它被当成显式配置固化。
+ * domain 只在偏离该站点默认值时才提交：把默认值落盘会让它被当成显式配置固化，
+ * 之后用户改了站点，X-Domain 不会跟随。
  */
 export function buildCodeBuddyCredentials(input: CodeBuddyCredentialInput): Record<string, unknown> {
   const credentials: Record<string, unknown> = {
-    access_token: input.accessToken.trim()
+    access_token: input.accessToken.trim(),
+    product: input.product ?? CODEBUDDY_DEFAULT_PRODUCT,
+    region: input.region ?? CODEBUDDY_DEFAULT_REGION
   }
   const refreshToken = input.refreshToken?.trim()
   if (refreshToken) credentials.refresh_token = refreshToken
@@ -321,14 +384,15 @@ export function buildCodeBuddyCredentials(input: CodeBuddyCredentialInput): Reco
   const enterpriseID = input.enterpriseID?.trim()
   if (enterpriseID) credentials.enterprise_id = enterpriseID
   const domain = input.domain?.trim()
-  if (domain && domain !== CODEBUDDY_DEFAULT_DOMAIN) credentials.domain = domain
+  const defaultDomain = codeBuddyDefaultDomain(input.product, input.region)
+  if (domain && domain !== defaultDomain) credentials.domain = domain
   return credentials
 }
 
 /** 回读 CodeBuddy 凭据中的可选字段（供编辑表单回填）。 */
 export function readCodeBuddyCredentialField(
   credentials: Record<string, unknown> | undefined | null,
-  key: 'refresh_token' | 'uid' | 'enterprise_id' | 'domain'
+  key: 'refresh_token' | 'uid' | 'enterprise_id' | 'domain' | 'product' | 'region'
 ): string {
   const value = credentials?.[key]
   return typeof value === 'string' ? value : ''

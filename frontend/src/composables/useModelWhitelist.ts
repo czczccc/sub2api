@@ -466,14 +466,25 @@ export function getModelsByPlatform(platform: string): string[] {
       'hy4-preview', 'hy3', 'omen-alpha'
     ]
     case 'codebuddy': return [
-      // 与后端 DefaultTencentCodeBuddyModelIDs() 保持一致（上游实时目录的静态兜底）。
-      // 注意：CodeBuddy 账号默认不预填白名单（= 允许所有模型），这里仅作选择器建议。
+      // 两个站点的目录**不重合**，这里是并集（仅作选择器建议；账号默认不预填白名单）：
+      //   大陆 copilot.tencent.com：hy3-x / deepseek-v4-pro / glm-5.3-flash / kimi-k3-1 /
+      //     glm-5.1 / glm-5v-turbo / kimi-k2.7 / minimax-m3 / auto
+      //   国际 www.workbuddy.ai：default|fast|balanced|primary|deep-model（路由别名）/
+      //     gpt-5.6-sol|terra|luna / gpt-5.5 / gpt-5.4 / gpt-5.3-codex / gemini-3.5-flash / kimi-k3
+      // 对应后端 DefaultTencentCodeBuddyModelIDs() / DefaultTencentWorkBuddyModelIDs()。
+      // 实际可用性以账号所属站点为准——选错站点的模型会返回 11102。
       'auto',
       'hy4-preview', 'hy3', 'hy3-x',
       'deepseek-v4.1-flash', 'deepseek-v4-pro',
       'glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5.1', 'glm-5v-turbo',
       'kimi-k3-1', 'kimi-k2.7', 'kimi-k2.6',
-      'minimax-m3'
+      'minimax-m3',
+      // ── 国际版 workbuddy.ai ──
+      'default-model', 'fast-model', 'balanced-model', 'primary-model', 'deep-model',
+      'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
+      'gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex',
+      'gemini-3.5-flash',
+      'kimi-k3'
     ]
     case 'doubao': return doubaoModels
     case 'minimax': return minimaxModels

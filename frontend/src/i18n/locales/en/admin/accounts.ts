@@ -109,9 +109,17 @@ export default {
         deepseek: 'DeepSeek',
         minimax: 'MiniMax',
         opencode_go: 'OpenCode',
-        codebuddy: 'CodeBuddy',
+        codebuddy: 'CodeBuddy / WorkBuddy',
       },
       codebuddy: {
+        site: 'Site',
+        siteHint: 'Determines which upstream site the account uses; switching sites invalidates the generated link.',
+        sites: {
+          codebuddy: 'CodeBuddy (Mainland China)',
+          codebuddyIntl: 'CodeBuddy (International)',
+          workbuddy: 'WorkBuddy (Mainland China)',
+          workbuddyIntl: 'WorkBuddy (International, workbuddy.ai)'
+        },
         auth: {
           title: 'CodeBuddy authorization',
           methodOAuth: 'Guided authorization (recommended)',
@@ -147,9 +155,9 @@ export default {
         userID: 'User ID (optional)',
         enterpriseID: 'Enterprise ID (optional)',
         domain: 'Domain (optional)',
-        domainHint: 'Defaults to www.codebuddy.cn; set only when the account belongs to a different domain.',
+        domainHint: "Leave empty to use the selected site's default domain (e.g. www.workbuddy.ai); set only when the account belongs to a different domain.",
         optional: 'optional',
-        hint: 'The upstream host is fixed to the mainland China endpoint (copilot.tencent.com); no Base URL needed.'
+        hint: 'The upstream host is fixed by the selected site (CodeBuddy / WorkBuddy × Mainland / International); no Base URL needed.'
       },
       cnProviders: {
         accountMode: {
