@@ -1239,7 +1239,7 @@ func (s *AccountTestService) fetchTencentCodeBuddyUpstreamModels(ctx context.Con
 		}
 		retry := *account
 		retry.Credentials = refreshed.Apply(account.Credentials)
-		models, status, err = client.fetchModels(ctx, &retry)
+		models, _, err = client.fetchModels(ctx, &retry)
 	}
 	if err != nil {
 		return nil, newUpstreamModelSyncErrorFromTencentCodeBuddy(err)
