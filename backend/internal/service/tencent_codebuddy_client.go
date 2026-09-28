@@ -243,7 +243,7 @@ func (c *TencentCodeBuddyClient) fetchModelsAt(
 		return nil, resp.StatusCode, infraerrors.Newf(http.StatusBadGateway, "TENCENT_CODEBUDDY_MODELS_HTTP_ERROR",
 			"fetch models failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return parseTencentCodeBuddyModelIDs(body), resp.StatusCode, nil
+	return parseTencentCodeBuddyModelIDsForProduct(body, cred.Endpoint().Product), resp.StatusCode, nil
 }
 
 // RefreshToken 调用官方刷新接口换取新的 access_token。

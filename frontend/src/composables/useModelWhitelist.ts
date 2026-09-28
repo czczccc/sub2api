@@ -476,7 +476,8 @@ export function getModelsByPlatform(platform: string): string[] {
       //   大陆 copilot.tencent.com：hy3-x / deepseek-v4-pro / glm-5.3-flash / kimi-k3-1 /
       //     glm-5.1 / glm-5v-turbo / kimi-k2.7 / minimax-m3 / auto
       //   国际 www.workbuddy.ai：default|fast|balanced|primary|deep-model（路由别名）/
-      //     gpt-5.6-sol|terra|luna / gpt-5.5 / gpt-5.4 / gpt-5.3-codex / gemini-3.5-flash / kimi-k3
+      //     deepseek-v4.1-flash / gpt-5.6-sol|terra|luna / gpt-5.5 / gpt-5.4 /
+      //     gpt-5.3-codex / gemini-3.5-flash / kimi-k3
       // 对应后端 DefaultTencentCodeBuddyModelIDs() / DefaultTencentWorkBuddyModelIDs()。
       // 实际可用性以账号所属站点为准——选错站点的模型会返回 11102。
       'auto',

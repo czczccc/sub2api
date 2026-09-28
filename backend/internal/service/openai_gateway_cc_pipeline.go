@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -182,10 +184,28 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	bufferWorkBuddyStream := false
 	// TencentCodeBuddy：腾讯私有上游对请求体有额外约束，必须先归一化再发出。
 	// 放在这个函数里是因为四条 CC 回退路径最终都经过它。
 	if account.IsTencentCodeBuddy() {
 		body = normalizeTencentCodeBuddyUpstreamPayload(body)
+		// WorkBuddy 国际版的 chat/completions 端点拒绝 stream=false（HTTP 400，
+		// code 11101）。客户端的标题生成等辅助请求通常是非流式；向上游改为 SSE，
+		// 再在网关内聚合成 JSON，避免把这个上游限制暴露给客户端。
+		cred := account.TencentCodeBuddyCredential()
+		if cred.Endpoint().Product == TencentCodeBuddyProductWorkBuddy && !stream {
+			var err error
+			body, err = sjson.SetBytes(body, "stream", true)
+			if err != nil {
+				return nil, fmt.Errorf("enable WorkBuddy streaming: %w", err)
+			}
+			body, err = ensureOpenAIChatStreamUsage(body)
+			if err != nil {
+				return nil, fmt.Errorf("enable WorkBuddy stream usage: %w", err)
+			}
+			stream = true
+			bufferWorkBuddyStream = true
+		}
 	}
 	// DeepSeek thinking mode 要求历史 assistant 回传 reasoning_content。
 	// Responses→CC 回退在加密-only / 缺 reasoning item 且缓存未命中时会漏掉该
@@ -251,7 +271,182 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
+	if bufferWorkBuddyStream && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
+		strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		if err := s.bufferWorkBuddyStreamResponse(c, resp); err != nil {
+			_ = resp.Body.Close()
+			return nil, err
+		}
+	}
 	return resp, nil
+}
+
+type bufferedCCStreamChoice struct {
+	index            int
+	role             string
+	content          strings.Builder
+	hasContent       bool
+	reasoning        strings.Builder
+	reasoningContent strings.Builder
+	finishReason     string
+	toolCalls        map[int]*apicompat.ChatToolCall
+}
+
+// bufferWorkBuddyStreamResponse turns the SSE response WorkBuddy requires into a
+// normal Chat Completions JSON response for callers that requested stream=false.
+func (s *OpenAIGatewayService) bufferWorkBuddyStreamResponse(c *gin.Context, resp *http.Response) error {
+	requestID := resp.Header.Get("x-request-id")
+	choices := make(map[int]*bufferedCCStreamChoice)
+	var aggregate apicompat.ChatCompletionsResponse
+	aggregate.Object = "chat.completion"
+	maxBufferedBytes := resolveUpstreamResponseReadLimit(s.cfg)
+	var bufferedBytes int64
+	tooLarge := false
+	appendStreamText := func(dst *strings.Builder, value string) {
+		bufferedBytes += int64(len(value))
+		if bufferedBytes > maxBufferedBytes {
+			tooLarge = true
+			return
+		}
+		dst.WriteString(value)
+	}
+	state := s.scanCCStream(c, resp, "workbuddy buffered chat completion", requestID, time.Now(), func(chunk *apicompat.ChatCompletionsChunk) {
+		if chunk.ID != "" {
+			aggregate.ID = chunk.ID
+		}
+		if chunk.Created != 0 {
+			aggregate.Created = chunk.Created
+		}
+		if chunk.Model != "" {
+			aggregate.Model = chunk.Model
+		}
+		if chunk.SystemFingerprint != "" {
+			aggregate.SystemFingerprint = chunk.SystemFingerprint
+		}
+		if chunk.ServiceTier != "" {
+			aggregate.ServiceTier = chunk.ServiceTier
+		}
+		if chunk.Usage != nil {
+			aggregate.Usage = chunk.Usage
+		}
+		for _, deltaChoice := range chunk.Choices {
+			choice := choices[deltaChoice.Index]
+			if choice == nil {
+				choice = &bufferedCCStreamChoice{index: deltaChoice.Index, toolCalls: make(map[int]*apicompat.ChatToolCall)}
+				choices[deltaChoice.Index] = choice
+			}
+			delta := deltaChoice.Delta
+			if delta.Role != "" {
+				choice.role = delta.Role
+			}
+			if delta.Content != nil {
+				appendStreamText(&choice.content, *delta.Content)
+				choice.hasContent = true
+			}
+			if delta.ReasoningContent != nil {
+				appendStreamText(&choice.reasoningContent, *delta.ReasoningContent)
+			}
+			if delta.Reasoning != nil {
+				appendStreamText(&choice.reasoning, *delta.Reasoning)
+			}
+			for position, deltaTool := range delta.ToolCalls {
+				toolIndex := position
+				if deltaTool.Index != nil {
+					toolIndex = *deltaTool.Index
+				}
+				tool := choice.toolCalls[toolIndex]
+				if tool == nil {
+					tool = &apicompat.ChatToolCall{}
+					choice.toolCalls[toolIndex] = tool
+				}
+				if deltaTool.ID != "" {
+					tool.ID = deltaTool.ID
+				}
+				if deltaTool.Type != "" {
+					tool.Type = deltaTool.Type
+				}
+				if deltaTool.Function.Name != "" {
+					bufferedBytes += int64(len(deltaTool.Function.Name))
+					if bufferedBytes > maxBufferedBytes {
+						tooLarge = true
+					} else {
+						tool.Function.Name = deltaTool.Function.Name
+					}
+				}
+				bufferedBytes += int64(len(deltaTool.Function.Arguments))
+				if bufferedBytes > maxBufferedBytes {
+					tooLarge = true
+				} else {
+					tool.Function.Arguments += deltaTool.Function.Arguments
+				}
+			}
+			if deltaChoice.FinishReason != nil {
+				choice.finishReason = *deltaChoice.FinishReason
+			}
+		}
+	})
+	_ = resp.Body.Close()
+	if state.Err != nil {
+		return fmt.Errorf("read WorkBuddy chat completion stream: %w", state.Err)
+	}
+	if tooLarge {
+		setOpsUpstreamError(c, http.StatusBadGateway, "upstream response too large", "")
+		openAITooLargeError(c)
+		return fmt.Errorf("%w: limit=%d", ErrUpstreamResponseBodyTooLarge, maxBufferedBytes)
+	}
+	if len(choices) == 0 {
+		return fmt.Errorf("WorkBuddy returned an empty chat completion stream (request_id=%s)", requestID)
+	}
+
+	indices := make([]int, 0, len(choices))
+	for index := range choices {
+		indices = append(indices, index)
+	}
+	sort.Ints(indices)
+	aggregate.Choices = make([]apicompat.ChatChoice, 0, len(indices))
+	for _, index := range indices {
+		buffered := choices[index]
+		message := apicompat.ChatMessage{Role: buffered.role}
+		if message.Role == "" {
+			message.Role = "assistant"
+		}
+		if buffered.hasContent {
+			content, err := json.Marshal(buffered.content.String())
+			if err != nil {
+				return fmt.Errorf("marshal WorkBuddy completion content: %w", err)
+			}
+			message.Content = content
+		}
+		message.ReasoningContent = buffered.reasoningContent.String()
+		message.Reasoning = buffered.reasoning.String()
+		toolIndices := make([]int, 0, len(buffered.toolCalls))
+		for toolIndex := range buffered.toolCalls {
+			toolIndices = append(toolIndices, toolIndex)
+		}
+		sort.Ints(toolIndices)
+		for _, toolIndex := range toolIndices {
+			tool := *buffered.toolCalls[toolIndex]
+			tool.Index = nil
+			message.ToolCalls = append(message.ToolCalls, tool)
+		}
+		aggregate.Choices = append(aggregate.Choices, apicompat.ChatChoice{
+			Index:        buffered.index,
+			Message:      message,
+			FinishReason: buffered.finishReason,
+		})
+	}
+	if aggregate.ID == "" {
+		aggregate.ID = requestID
+	}
+	body, err := json.Marshal(aggregate)
+	if err != nil {
+		return fmt.Errorf("marshal buffered WorkBuddy chat completion: %w", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Type", "application/json")
+	resp.Header.Del("Content-Encoding")
+	return nil
 }
 
 // ccStreamScanState 是 scanCCStream 返回的读取状态快照。

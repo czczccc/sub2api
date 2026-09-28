@@ -259,8 +259,9 @@ func DefaultTencentCodeBuddyModelIDs() []string {
 
 // DefaultTencentWorkBuddyModelIDs 是 WorkBuddy（国际版 workbuddy.ai）的静态兜底模型目录。
 //
-// 实测来源（2026-09-12，真实 workbuddy.ai 账号）：
+// 基础目录实测来源（2026-09-12，真实 workbuddy.ai 账号）：
 // GET {host}/v2/enterprises/personal/models → data.models[].id，共 18 项。
+// deepseek-v4.1-flash 根据 WorkBuddy 客户端可用模型补入静态兜底目录。
 // 同一响应的 data.models[].credits 就是客户端模型选择器里显示的倍率（如 glm-5.3 = x0.79），
 // data.modelPromotions 是 "Free now" 角标的来源。
 //
@@ -280,6 +281,7 @@ func DefaultTencentWorkBuddyModelIDs() []string {
 		"deep-model",
 		"hy4-preview",
 		"hy3",
+		"deepseek-v4.1-flash",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -594,6 +596,13 @@ func (p *TencentCodeBuddyProvider) FetchModelIDs(ctx context.Context, account *A
 // CLI agent 的 models 是可用清单，models[] 提供 disabled 元信息。为了让实现对
 // 上游形态变化更耐受，同时接受 OpenAI 风格 {"data":[{"id":...}]} 与纯字符串数组。
 func parseTencentCodeBuddyModelIDs(body []byte) []string {
+	return parseTencentCodeBuddyModelIDsForProduct(body, TencentCodeBuddyProductCodeBuddy)
+}
+
+// parseTencentCodeBuddyModelIDsForProduct 解析对应产品的上游模型目录。国际版 WorkBuddy
+// 的 data.models 是客户端模型选择器使用的实时目录；大陆 CodeBuddy 则以 cli agent
+// 的 models 为可用清单，不能把两种产品的目录语义混为一谈。
+func parseTencentCodeBuddyModelIDsForProduct(body []byte, product string) []string {
 	var payload struct {
 		Data json.RawMessage `json:"data"`
 	}
@@ -638,18 +647,27 @@ func parseTencentCodeBuddyModelIDs(body []byte) []string {
 	}
 
 	var candidates []string
-	for _, agent := range envelope.Agents {
-		if strings.EqualFold(strings.TrimSpace(agent.Name), "cli") {
-			candidates = append(candidates, agent.Models...)
-		}
-	}
-	// 没有 cli agent 时退化为"全部已知模型"，好过直接回落静态列表。
-	if len(candidates) == 0 {
-		candidates = make([]string, 0, len(known))
+	if NormalizeTencentCodeBuddyProduct(product) == TencentCodeBuddyProductWorkBuddy && len(known) > 0 {
+		// WorkBuddy 的 data.models 是实际提供给国际版客户端的模型目录。即使同一
+		// 响应附带了较窄的 cli agent.models，也不能用后者过滤掉客户端可选模型。
 		for id := range known {
 			candidates = append(candidates, id)
 		}
 		sort.Strings(candidates)
+	} else {
+		for _, agent := range envelope.Agents {
+			if strings.EqualFold(strings.TrimSpace(agent.Name), "cli") {
+				candidates = append(candidates, agent.Models...)
+			}
+		}
+		// 没有 cli agent 时退化为"全部已知模型"，好过直接回落静态列表。
+		if len(candidates) == 0 {
+			candidates = make([]string, 0, len(known))
+			for id := range known {
+				candidates = append(candidates, id)
+			}
+			sort.Strings(candidates)
+		}
 	}
 
 	seen := make(map[string]struct{}, len(candidates))
