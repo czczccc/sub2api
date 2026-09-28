@@ -191,6 +191,8 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 
 This section summarizes additions maintained by `czczccc/sub2api` relative to `Wei-Shaw/sub2api` and can serve as a technical overview of this fork.
 
+As of 2026-09-28, compared with the synced `upstream/main` baseline, this fork changes **103 files, with about 7,926 insertions and 88 deletions** (including implementation, tests, database migrations, documentation, and CI configuration).
+
 - **CodeBuddy / WorkBuddy provider** — Added a dedicated Go provider, account authorization and token refresh, credential storage and database migrations, model catalog sync, and admin UI flows. Supports mainland and global CodeBuddy and WorkBuddy sites, with site-specific upstream hosts and identity headers.
 - **Multi-protocol gateway adaptation** — Routed Anthropic Messages (`/v1/messages`) and OpenAI Responses (`/v1/responses`) clients through the existing conversion pipeline for Chat Completions-only upstreams. Converts request and response formats while preserving streaming, tool calls, and usage handling.
 - **Model capability management** — Added admin configuration for image input, reasoning levels, context windows, and output limits; exposes capability metadata to model catalogs and clients, and applies group reasoning ceilings to CodeBuddy clients.

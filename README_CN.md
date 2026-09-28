@@ -193,6 +193,8 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 
 本节记录 `czczccc/sub2api` 相对上游 `Wei-Shaw/sub2api` 增加和维护的功能，适合作为项目经历的技术概览。
 
+截至 2026-09-28，与同步的 `upstream/main` 基线比较，累计涉及 **103 个文件、约 7,926 行新增和 88 行删除**（包含实现、测试、数据库迁移、文档和 CI 配置）。
+
 - **接入 CodeBuddy / WorkBuddy 上游**：在 Go 后端实现独立 provider、授权与令牌刷新、账号凭据和数据库迁移、模型目录同步；管理后台提供授权与编辑流程。覆盖 CodeBuddy / WorkBuddy 的大陆版和国际版四种站点组合，并按所选站点处理上游地址和身份头。
 - **做多协议网关适配**：CodeBuddy / WorkBuddy 上游采用 Chat Completions。将客户端的 Anthropic Messages（`/v1/messages`）和 OpenAI Responses（`/v1/responses`）请求接入现有转换链，并把请求转换到上游协议、再转换回客户端协议；保留流式响应、工具调用和用量处理。
 - **补齐模型能力配置**：在管理后台增加模型能力配置，用于声明图片输入、推理档位、上下文窗口和最大输出等信息，并把能力元数据提供给模型列表和客户端；为 CodeBuddy 客户端增加分组推理档位上限处理。
