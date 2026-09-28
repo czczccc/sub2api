@@ -851,12 +851,29 @@ Antigravity accounts support optional **hybrid scheduling**. When enabled, the g
 
 > **⚠️ Warning**: Anthropic Claude and Antigravity Claude **cannot be mixed within the same conversation context**. Use groups to isolate them properly.
 
-## Tencent CodeBuddy Support
+## Tencent CodeBuddy / WorkBuddy Support
 
-Sub2API supports Tencent CodeBuddy (mainland China) accounts through the private
-`copilot.tencent.com/v2` upstream. The upstream host and the `X-Domain` identity
-header are fixed by the backend — accounts only carry tokens and optional
-identity fields, never a Base URL.
+The `CodeBuddy` platform supports mainland and global CodeBuddy and WorkBuddy accounts. Select the site when adding an account; the backend fixes the upstream host and `X-Domain` identity header for that site. Accounts store credentials and optional identity fields, not a custom Base URL. Model catalogs differ by site, so use a model ID available on the selected site. See the [client setup guide](docs/CODEBUDDY_CLIENT_SETUP.md) for the site matrix and model details.
+
+### Anthropic Messages / Claude Code
+
+CodeBuddy and WorkBuddy upstreams use OpenAI Chat Completions. Sub2API converts Anthropic Messages requests to the upstream format and converts responses back. Assign the Sub2API API key to a CodeBuddy platform group (for example, `workbuddy`), then call:
+
+```text
+POST https://<your-domain>/v1/messages
+```
+
+For Anthropic-compatible clients, the Base URL is usually `https://<your-domain>`; the client appends `/v1/messages`. For a manual HTTP request, use the full path and send the Sub2API API key in the `x-api-key` header. CodeBuddy groups do not need a separate `allow_messages_dispatch` setting.
+
+```bash
+curl https://<your-domain>/v1/messages \
+  -H "x-api-key: <your Sub2API API key>" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"<model ID available on the selected site>","max_tokens":512,"stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+The global WorkBuddy upstream requires streaming. If a client sends `stream: false`, the gateway requests SSE upstream and buffers the result as a regular JSON response. With `stream: true`, it returns an Anthropic SSE stream. Protocol conversion does not grant upstream model access; for errors such as an unavailable model or `request illegal`, check the selected site, model ID, and account authorization.
 
 Probed upstream capabilities (2026-09-12):
 
@@ -864,8 +881,10 @@ Probed upstream capabilities (2026-09-12):
   both inline `data:` URLs and public HTTPS URLs.
 - **Reasoning effort** — `reasoning_effort` is honoured; `low` / `medium` / `high`
   are advertised in the Codex models manifest.
-- **Not supported** — non-streaming requests (`11101`); the gateway normalises
-  `role: "developer"` and object-form `tool_choice` before forwarding (`11128`).
+- **Request constraint** — the global WorkBuddy upstream rejects `stream: false`
+  (`11101`); the gateway automatically requests SSE and buffers the result. It
+  also normalises `role: "developer"` and object-form `tool_choice` before
+  forwarding (otherwise the upstream returns `11128`).
 
 Context windows and output limits have no upstream source, so they are declared
 by an operator under **Settings → Model capabilities**.

@@ -767,19 +767,36 @@ Antigravity 账户支持可选的**混合调度**功能。开启后，通用端�
 
 > **⚠️ 注意**：Anthropic Claude 和 Antigravity Claude **不能在同一上下文中混合使用**，请通过分组功能做好隔离。
 
-## 腾讯 CodeBuddy 使用说明
+## 腾讯 CodeBuddy / WorkBuddy 使用说明
 
-Sub2API 支持腾讯 CodeBuddy（中国大陆版）账号，走私有上游 `copilot.tencent.com/v2`。
-上游 host 与 `X-Domain` 身份头由后端固定，账号只需保存令牌与可选身份字段，**不接受
-Base URL**。
+Sub2API 的 `CodeBuddy` 平台支持 CodeBuddy 与 WorkBuddy 的大陆版和国际版账号。添加账号时选择对应站点；后端根据站点固定上游 host 与 `X-Domain` 身份头，账号只需保存令牌与可选身份字段，**不接受自定义 Base URL**。四个站点的模型目录并不相同，请使用所选站点实际提供的模型 ID。详细站点与模型说明见[客户端接入文档](docs/CODEBUDDY_CLIENT_SETUP.md)。
+
+### Anthropic Messages / Claude Code 接入
+
+CodeBuddy / WorkBuddy 上游使用 OpenAI Chat Completions 协议；Sub2API 可将 Anthropic Messages 请求转换为上游请求，并把响应转换回 Anthropic 格式。给 API Key 绑定 CodeBuddy 平台分组（例如 `workbuddy`）后，可直接调用：
+
+```text
+POST https://<你的域名>/v1/messages
+```
+
+Anthropic-compatible 客户端的 Base URL 通常填写 `https://<你的域名>`，由客户端自动请求 `/v1/messages`。手动发送 HTTP 请求时使用完整路径，并将 Sub2API API Key 放在 `x-api-key` 请求头中。CodeBuddy 分组无需额外开启 `allow_messages_dispatch`。
+
+```bash
+curl https://<你的域名>/v1/messages \
+  -H "x-api-key: <你的 Sub2API API Key>" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"<所选站点支持的模型 ID>","max_tokens":512,"stream":true,"messages":[{"role":"user","content":"你好"}]}'
+```
+
+国际版 WorkBuddy 上游要求流式请求。即使客户端发送 `stream: false`，网关也会向上游请求 SSE，再缓冲为普通 JSON 响应；客户端请求 `stream: true` 时则返回 Anthropic SSE 流。协议转换不会增加上游账号本身没有的模型权限；若上游返回模型不可用或 `request illegal` 等错误，仍需检查站点、模型 ID 与账号授权。
 
 实测上游能力（2026-09-12）：
 
 - **图片输入** —— 15 个模型全部接受 OpenAI 形状的 `image_url`，内联 `data:` URL
   与公网 HTTPS URL 均可。
 - **推理档位** —— 识别 `reasoning_effort`；Codex 模型清单里声明 `low` / `medium` / `high`。
-- **不支持** —— 非流式请求（业务码 `11101`）；网关会在转发前归一化
-  `role: "developer"` 与对象形态的 `tool_choice`（否则命中 `11128`）。
+- **请求约束** —— 国际版 WorkBuddy 上游不接受 `stream: false`（业务码 `11101`）；网关会自动改为 SSE 请求并缓冲结果。网关也会在转发前归一化 `role: "developer"` 与对象形态的 `tool_choice`（否则上游会返回 `11128`）。
 
 上下文窗口与输出上限没有上游来源，由管理员在**系统设置 → 模型能力**中手工声明。
 
