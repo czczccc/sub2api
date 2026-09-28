@@ -189,6 +189,19 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **管理后台** - Web 界面进行监控和管理
 - **外部系统集成** - 支持通过 iframe 嵌入外部系统（如工单等），扩展管理后台功能
 
+## 本 Fork 的扩展与工程实践
+
+本节记录 `czczccc/sub2api` 相对上游 `Wei-Shaw/sub2api` 增加和维护的功能，适合作为项目经历的技术概览。
+
+- **接入 CodeBuddy / WorkBuddy 上游**：在 Go 后端实现独立 provider、授权与令牌刷新、账号凭据和数据库迁移、模型目录同步；管理后台提供授权与编辑流程。覆盖 CodeBuddy / WorkBuddy 的大陆版和国际版四种站点组合，并按所选站点处理上游地址和身份头。
+- **做多协议网关适配**：CodeBuddy / WorkBuddy 上游采用 Chat Completions。将客户端的 Anthropic Messages（`/v1/messages`）和 OpenAI Responses（`/v1/responses`）请求接入现有转换链，并把请求转换到上游协议、再转换回客户端协议；保留流式响应、工具调用和用量处理。
+- **补齐模型能力配置**：在管理后台增加模型能力配置，用于声明图片输入、推理档位、上下文窗口和最大输出等信息，并把能力元数据提供给模型列表和客户端；为 CodeBuddy 客户端增加分组推理档位上限处理。
+- **处理国际版差异与上游限制**：按站点获取不同模型目录，修正 WorkBuddy 国际版目录解析，并为 `deepseek-v4.1-flash` 增加模型回退；针对国际版上游不接受非流式请求的情况，由网关改用 SSE 请求并聚合成普通 JSON，避免把上游限制直接暴露给客户端。
+- **完善账号与请求边界**：归一化 CodeBuddy 上游要求的请求字段和工具调用格式，补充平台识别、错误透传和 `/v1/messages` 分组调度规则；增加授权、目录、凭据迁移和请求归一化相关测试。
+- **补充构建与交付自动化**：配置 GitHub Actions 在 `main` 更新后通过 SSH 执行 VPS 上的 Docker Compose 构建部署；为前端构建提供可配置的 `NODE_OPTIONS` 内存参数，并修复 CI lint 问题。
+
+**技术覆盖**：Go 服务端与协议转换、Vue 3 管理界面、Ent/PostgreSQL 迁移、上游 API 适配、自动化测试和 GitHub Actions 部署。
+
 ## 生态项目
 
 围绕 Sub2API 的社区扩展与集成项目：
@@ -767,29 +780,9 @@ Antigravity 账户支持可选的**混合调度**功能。开启后，通用端�
 
 > **⚠️ 注意**：Anthropic Claude 和 Antigravity Claude **不能在同一上下文中混合使用**，请通过分组功能做好隔离。
 
-## 腾讯 CodeBuddy / WorkBuddy 使用说明
+## 腾讯 CodeBuddy / WorkBuddy 技术说明
 
-Sub2API 的 `CodeBuddy` 平台支持 CodeBuddy 与 WorkBuddy 的大陆版和国际版账号。添加账号时选择对应站点；后端根据站点固定上游 host 与 `X-Domain` 身份头，账号只需保存令牌与可选身份字段，**不接受自定义 Base URL**。四个站点的模型目录并不相同，请使用所选站点实际提供的模型 ID。详细站点与模型说明见[客户端接入文档](docs/CODEBUDDY_CLIENT_SETUP.md)。
-
-### Anthropic Messages / Claude Code 接入
-
-CodeBuddy / WorkBuddy 上游使用 OpenAI Chat Completions 协议；Sub2API 可将 Anthropic Messages 请求转换为上游请求，并把响应转换回 Anthropic 格式。给 API Key 绑定 CodeBuddy 平台分组（例如 `workbuddy`）后，可直接调用：
-
-```text
-POST https://<你的域名>/v1/messages
-```
-
-Anthropic-compatible 客户端的 Base URL 通常填写 `https://<你的域名>`，由客户端自动请求 `/v1/messages`。手动发送 HTTP 请求时使用完整路径，并将 Sub2API API Key 放在 `x-api-key` 请求头中。CodeBuddy 分组无需额外开启 `allow_messages_dispatch`。
-
-```bash
-curl https://<你的域名>/v1/messages \
-  -H "x-api-key: <你的 Sub2API API Key>" \
-  -H "anthropic-version: 2023-06-01" \
-  -H "content-type: application/json" \
-  -d '{"model":"<所选站点支持的模型 ID>","max_tokens":512,"stream":true,"messages":[{"role":"user","content":"你好"}]}'
-```
-
-国际版 WorkBuddy 上游要求流式请求。即使客户端发送 `stream: false`，网关也会向上游请求 SSE，再缓冲为普通 JSON 响应；客户端请求 `stream: true` 时则返回 Anthropic SSE 流。协议转换不会增加上游账号本身没有的模型权限；若上游返回模型不可用或 `request illegal` 等错误，仍需检查站点、模型 ID 与账号授权。
+`CodeBuddy` 平台覆盖 CodeBuddy / WorkBuddy × 大陆 / 国际四种站点；每个站点有各自的账号授权和模型目录。上游推理接口采用 Chat Completions，`/v1/messages` 与 `/v1/responses` 由网关协议转换链适配。模型目录因站点而异，模型能力信息可在**系统设置 → 模型能力**中声明。
 
 实测上游能力（2026-09-12）：
 

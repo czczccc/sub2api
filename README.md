@@ -187,6 +187,19 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 - **Composite Groups** - Admin routing layer that resolves requested models to concrete providers for multi-provider groups ([Operator Guide](docs/COMPOSITE_GROUPS.md))
 - **External System Integration** - Embed external systems (e.g. ticketing) via iframe to extend the admin dashboard
 
+## Fork Contributions
+
+This section summarizes additions maintained by `czczccc/sub2api` relative to `Wei-Shaw/sub2api` and can serve as a technical overview of this fork.
+
+- **CodeBuddy / WorkBuddy provider** — Added a dedicated Go provider, account authorization and token refresh, credential storage and database migrations, model catalog sync, and admin UI flows. Supports mainland and global CodeBuddy and WorkBuddy sites, with site-specific upstream hosts and identity headers.
+- **Multi-protocol gateway adaptation** — Routed Anthropic Messages (`/v1/messages`) and OpenAI Responses (`/v1/responses`) clients through the existing conversion pipeline for Chat Completions-only upstreams. Converts request and response formats while preserving streaming, tool calls, and usage handling.
+- **Model capability management** — Added admin configuration for image input, reasoning levels, context windows, and output limits; exposes capability metadata to model catalogs and clients, and applies group reasoning ceilings to CodeBuddy clients.
+- **International-site compatibility and upstream fallbacks** — Handles site-specific model catalogs, fixes WorkBuddy global catalog parsing, adds a fallback for `deepseek-v4.1-flash`, and bridges the global upstream's stream-only behavior by requesting SSE and buffering non-streaming responses as JSON.
+- **Account and request hardening** — Normalizes CodeBuddy request fields and tool-call shapes, classifies provider keys correctly, adds `/v1/messages` dispatch support for CodeBuddy groups, and covers authorization, catalog, migration, and normalization paths with tests.
+- **Build and delivery automation** — Added a GitHub Actions workflow that deploys `main` to a VPS over SSH and rebuilds with Docker Compose; made frontend build memory configurable through `NODE_OPTIONS` and resolved CI lint issues.
+
+**Technical scope:** Go services and protocol conversion, Vue 3 admin UI, Ent/PostgreSQL migrations, upstream API integration, automated tests, and GitHub Actions deployment.
+
 ## Ecosystem
 
 Community projects that extend or integrate with Sub2API:
@@ -851,29 +864,9 @@ Antigravity accounts support optional **hybrid scheduling**. When enabled, the g
 
 > **⚠️ Warning**: Anthropic Claude and Antigravity Claude **cannot be mixed within the same conversation context**. Use groups to isolate them properly.
 
-## Tencent CodeBuddy / WorkBuddy Support
+## Tencent CodeBuddy / WorkBuddy Technical Notes
 
-The `CodeBuddy` platform supports mainland and global CodeBuddy and WorkBuddy accounts. Select the site when adding an account; the backend fixes the upstream host and `X-Domain` identity header for that site. Accounts store credentials and optional identity fields, not a custom Base URL. Model catalogs differ by site, so use a model ID available on the selected site. See the [client setup guide](docs/CODEBUDDY_CLIENT_SETUP.md) for the site matrix and model details.
-
-### Anthropic Messages / Claude Code
-
-CodeBuddy and WorkBuddy upstreams use OpenAI Chat Completions. Sub2API converts Anthropic Messages requests to the upstream format and converts responses back. Assign the Sub2API API key to a CodeBuddy platform group (for example, `workbuddy`), then call:
-
-```text
-POST https://<your-domain>/v1/messages
-```
-
-For Anthropic-compatible clients, the Base URL is usually `https://<your-domain>`; the client appends `/v1/messages`. For a manual HTTP request, use the full path and send the Sub2API API key in the `x-api-key` header. CodeBuddy groups do not need a separate `allow_messages_dispatch` setting.
-
-```bash
-curl https://<your-domain>/v1/messages \
-  -H "x-api-key: <your Sub2API API key>" \
-  -H "anthropic-version: 2023-06-01" \
-  -H "content-type: application/json" \
-  -d '{"model":"<model ID available on the selected site>","max_tokens":512,"stream":true,"messages":[{"role":"user","content":"Hello"}]}'
-```
-
-The global WorkBuddy upstream requires streaming. If a client sends `stream: false`, the gateway requests SSE upstream and buffers the result as a regular JSON response. With `stream: true`, it returns an Anthropic SSE stream. Protocol conversion does not grant upstream model access; for errors such as an unavailable model or `request illegal`, check the selected site, model ID, and account authorization.
+The `CodeBuddy` platform supports four product/site combinations: CodeBuddy and WorkBuddy on mainland and global sites. Each site has its own account authorization and model catalog. The upstream inference API uses Chat Completions, while `/v1/messages` and `/v1/responses` are adapted by the gateway protocol-conversion pipeline. Model catalogs vary by site; operators can declare model capabilities under **Settings → Model capabilities**.
 
 Probed upstream capabilities (2026-09-12):
 
