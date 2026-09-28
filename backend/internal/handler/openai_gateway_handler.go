@@ -298,13 +298,12 @@ func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKe
 	if apiKey == nil || apiKey.Group == nil {
 		return true
 	}
-	if apiKey.Group.Platform == service.PlatformGrok {
+	if apiKey.Group.Platform == service.PlatformGrok || apiKey.Group.Platform == service.PlatformTencentCodeBuddy {
 		return true
 	}
-	// 国产供应商分组与 grok 同语义:/v1/messages 就是其主要服务形态(anthropic
-	// 协议账号原生直通 Claude Code),无需 allow_messages_dispatch 开关授权——
-	// 该开关对非 openai/composite 平台恒被 sanitizeGroupMessagesDispatchFields 置 false,
-	// 若不豁免,CN 分组将永远 403。
+	// Grok、CodeBuddy 和多协议 API Key 供应商分组允许使用 /v1/messages，
+	// 无需 allow_messages_dispatch 开关授权。该开关对非 openai/composite 平台
+	// 恒被 sanitizeGroupMessagesDispatchFields 置 false，因此这些平台需在此显式豁免。
 	if service.IsMultiProtocolAPIKeyProvider(apiKey.Group.Platform) {
 		return true
 	}
