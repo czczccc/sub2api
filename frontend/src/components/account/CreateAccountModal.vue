@@ -239,7 +239,7 @@
             ]"
           >
             <PlatformIcon platform="codebuddy" size="sm" />
-            CodeBuddy / WorkBuddy
+            WorkBuddy
           </button>
         </div>
       </div>
@@ -4029,7 +4029,7 @@ import {
   cloneOpenCodeGoProtocolRules,
   cnSupportsNativeResponses,
   codeBuddySiteFromKey,
-  codeBuddySiteKey,
+  DEFAULT_CREATE_CODEBUDDY_SITE_KEY,
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   defaultOpenCodeProtocolRules,
@@ -4243,7 +4243,7 @@ const upstreamBillingAutoProbeEnabled = ref(true)
 // authMode=oauth 走设备授权向导（推荐）；authMode=manual 走手工填写兜底。
 // 站点（product × region）决定上游 host，由向导与手工两条路径共用。
 const codeBuddyAuthMode = ref<'oauth' | 'manual'>('oauth')
-const codeBuddySiteSelection = ref(codeBuddySiteKey('codebuddy', 'china'))
+const codeBuddySiteSelection = ref(DEFAULT_CREATE_CODEBUDDY_SITE_KEY)
 const codeBuddyAccessToken = ref('')
 const codeBuddyRefreshToken = ref('')
 const codeBuddyUserID = ref('')
@@ -4409,7 +4409,7 @@ function selectCodeBuddyPlatform() {
 
 function resetCodeBuddyForm() {
   codeBuddyAuthMode.value = 'oauth'
-  codeBuddySiteSelection.value = codeBuddySiteKey('codebuddy', 'china')
+  codeBuddySiteSelection.value = DEFAULT_CREATE_CODEBUDDY_SITE_KEY
   codeBuddyAccessToken.value = ''
   codeBuddyRefreshToken.value = ''
   codeBuddyUserID.value = ''

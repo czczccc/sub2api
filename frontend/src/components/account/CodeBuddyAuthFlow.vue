@@ -122,6 +122,51 @@
                     {{ t('admin.accounts.codebuddy.auth.open') }}
                   </a>
                 </div>
+
+                <!-- 扫码登录：把授权链接渲染成二维码，可截图 / 复制图片 / 拍照发给他人，
+                     对方用微信扫码（或长按识别）打开同一个授权页完成登录，本页轮询照常取回凭据。 -->
+                <div
+                  v-if="qrDataUrl"
+                  class="mt-3 rounded-lg border border-dashed border-sky-300 p-3 dark:border-sky-700"
+                  data-testid="codebuddy-auth-qr"
+                >
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">
+                    {{ t('admin.accounts.codebuddy.auth.qrTitle') }}
+                  </p>
+                  <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                    {{ t('admin.accounts.codebuddy.auth.qrHint') }}
+                  </p>
+                  <div class="mt-2 flex flex-col items-start gap-3 sm:flex-row sm:items-end">
+                    <img
+                      :src="qrDataUrl"
+                      :alt="t('admin.accounts.codebuddy.auth.qrTitle')"
+                      class="h-48 w-48 rounded bg-white p-2"
+                      data-testid="codebuddy-auth-qr-image"
+                    />
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        data-testid="codebuddy-auth-qr-copy"
+                        @click="handleCopyQr"
+                      >
+                        {{
+                          qrCopied
+                            ? t('admin.accounts.codebuddy.auth.qrCopied')
+                            : t('admin.accounts.codebuddy.auth.qrCopy')
+                        }}
+                      </button>
+                      <a
+                        class="btn btn-secondary btn-sm"
+                        :href="qrDataUrl"
+                        :download="qrFileName"
+                        data-testid="codebuddy-auth-qr-download"
+                      >
+                        {{ t('admin.accounts.codebuddy.auth.qrDownload') }}
+                      </a>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -182,6 +227,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import QRCode from 'qrcode'
 import Icon from '@/components/icons/Icon.vue'
 import {
   pollCodeBuddyAuth,
@@ -189,7 +235,8 @@ import {
   type CodeBuddyAuthCredentials
 } from '@/api/admin/accounts'
 import {
-  CODEBUDDY_SITES,
+  CREATABLE_CODEBUDDY_SITES,
+  DEFAULT_CREATE_CODEBUDDY_SITE_KEY,
   codeBuddySiteFromKey,
   codeBuddySiteKey
 } from './credentialsBuilder'
@@ -199,9 +246,9 @@ const mode = defineModel<'oauth' | 'manual'>('mode', { default: 'oauth' })
 
 /**
  * 站点选择（product × region）。由父组件持有，因为创建账号时需要写进凭据。
- * 默认大陆 CodeBuddy，与后端归一化默认一致。
+ * 新建入口只提供 WorkBuddy（大陆 / 国际），默认大陆 WorkBuddy。
  */
-const siteKey = defineModel<string>('siteKey', { default: codeBuddySiteKey('codebuddy', 'china') })
+const siteKey = defineModel<string>('siteKey', { default: DEFAULT_CREATE_CODEBUDDY_SITE_KEY })
 
 const emit = defineEmits<{
   /** 授权成功：把凭据交给父组件填入表单（父组件是表单状态的唯一拥有者）。 */
@@ -215,7 +262,7 @@ const site = computed(() => ({ product: selectedSite.value.product, region: sele
 
 /** 站点选项：i18n 标签 + 该站点的默认 X-Domain 提示。 */
 const siteOptions = computed(() =>
-  CODEBUDDY_SITES.map((item) => ({
+  CREATABLE_CODEBUDDY_SITES.map((item) => ({
     key: codeBuddySiteKey(item.product, item.region),
     domain: item.domain,
     label: t(`admin.accounts.codebuddy.sites.${item.labelKey}`)
@@ -230,12 +277,20 @@ const pending = ref(false)
 const errorMessage = ref('')
 const successText = ref('')
 const copied = ref(false)
+const qrDataUrl = ref('')
+const qrCopied = ref(false)
+
+/** 下载的二维码文件名带上站点，便于区分大陆 / 国际。 */
+const qrFileName = computed(
+  () => `workbuddy-login-${selectedSite.value.region}.png`
+)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let pollDeadline = 0
 
 const POLL_INTERVAL_MS = 3000
-const POLL_TIMEOUT_MS = 10 * 60 * 1000
+// 二维码常常要发给别人扫，留足等待时间；超时后需重新生成。
+const POLL_TIMEOUT_MS = 30 * 60 * 1000
 
 function stopPolling() {
   if (pollTimer !== null) {
@@ -254,10 +309,13 @@ function handleStart() {
   successText.value = ''
   pending.value = false
   copied.value = false
+  qrDataUrl.value = ''
+  qrCopied.value = false
   startCodeBuddyAuth(site.value)
     .then((session) => {
       authUrl.value = session.auth_url
       state.value = session.state
+      void renderQr(session.auth_url)
       // 生成链接后自动开始轮询，用户只需去浏览器完成登录。
       startPolling()
     })
@@ -343,6 +401,33 @@ async function handleCopy() {
   }
 }
 
+async function renderQr(url: string) {
+  try {
+    const dataUrl = await QRCode.toDataURL(url, { width: 360, margin: 2, errorCorrectionLevel: 'M' })
+    // 期间可能已重新生成或切换站点，只认当前链接。
+    if (authUrl.value === url) qrDataUrl.value = dataUrl
+  } catch {
+    qrDataUrl.value = ''
+  }
+}
+
+/** 复制二维码图片到剪贴板，直接粘贴进微信发给对方。 */
+async function handleCopyQr() {
+  try {
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+      throw new Error('clipboard image unsupported')
+    }
+    const blob = await (await fetch(qrDataUrl.value)).blob()
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+    qrCopied.value = true
+    setTimeout(() => {
+      qrCopied.value = false
+    }, 2000)
+  } catch {
+    errorMessage.value = t('admin.accounts.codebuddy.auth.qrCopyFailed')
+  }
+}
+
 // 切到手工方式时停止轮询，避免后台继续打上游。
 watch(mode, (value) => {
   if (value === 'manual') stopPolling()
@@ -354,6 +439,8 @@ watch(siteKey, () => {
   stopPolling()
   authUrl.value = ''
   state.value = ''
+  qrDataUrl.value = ''
+  qrCopied.value = false
   pending.value = false
   errorMessage.value = ''
   successText.value = ''

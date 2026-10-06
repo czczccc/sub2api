@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, ref, h } from 'vue'
 
-const { startMock, pollMock } = vi.hoisted(() => ({
+const { startMock, pollMock, qrMock } = vi.hoisted(() => ({
   startMock: vi.fn(),
-  pollMock: vi.fn()
+  pollMock: vi.fn(),
+  qrMock: vi.fn()
 }))
+
+vi.mock('qrcode', () => ({ default: { toDataURL: qrMock } }))
 
 vi.mock('@/api/admin/accounts', () => ({
   startCodeBuddyAuth: startMock,
@@ -29,8 +32,8 @@ const READY_CREDENTIALS = {
   region: 'global'
 }
 
-/** 默认站点：大陆 CodeBuddy。 */
-const DEFAULT_SITE = { product: 'codebuddy', region: 'china' }
+/** 默认站点：大陆 WorkBuddy。 */
+const DEFAULT_SITE = { product: 'workbuddy', region: 'china' }
 /** 国际版 WorkBuddy。 */
 const WORKBUDDY_INTL_SITE = { product: 'workbuddy', region: 'global' }
 
@@ -38,7 +41,7 @@ const WORKBUDDY_INTL_SITE = { product: 'workbuddy', region: 'global' }
  * 用真实的 v-model 宿主挂载：site-key / mode 都是 defineModel，
  * 子组件只 emit，必须由父组件把新值同步回来（否则会回弹到旧值）。
  */
-function mountFlow(initialSiteKey = 'codebuddy/china') {
+function mountFlow(initialSiteKey = 'workbuddy/china') {
   const Host = defineComponent({
     setup(_, { expose }) {
       const siteKey = ref(initialSiteKey)
@@ -62,6 +65,8 @@ describe('CodeBuddyAuthFlow', () => {
     vi.useFakeTimers()
     startMock.mockReset()
     pollMock.mockReset()
+    qrMock.mockReset()
+    qrMock.mockImplementation(async (text: string) => `data:image/png;base64,QR(${text})`)
   })
 
   afterEach(() => {
@@ -92,7 +97,7 @@ describe('CodeBuddyAuthFlow', () => {
     wrapper.unmount()
   })
 
-  it('默认站点为大陆 CodeBuddy，并把它随授权请求下发', async () => {
+  it('默认站点为大陆 WorkBuddy，并把它随授权请求下发', async () => {
     startMock.mockResolvedValue({ state: 'st-1', auth_url: 'https://copilot.tencent.com/login?state=st-1' })
     pollMock.mockResolvedValue({ status: 'pending' })
 
@@ -129,6 +134,38 @@ describe('CodeBuddyAuthFlow', () => {
     await wrapper.find('[data-testid="codebuddy-generate-link"]').trigger('click')
     await flushPromises()
     expect(startMock).toHaveBeenLastCalledWith(WORKBUDDY_INTL_SITE)
+    wrapper.unmount()
+  })
+
+  it('新建入口只提供 WorkBuddy 大陆 / 国际两个站点', () => {
+    const { wrapper } = mountFlow()
+    const keys = wrapper
+      .findAll('[data-testid^="codebuddy-site-"]')
+      .map((node) => node.attributes('data-testid'))
+    expect(keys).toEqual(['codebuddy-site-workbuddy/china', 'codebuddy-site-workbuddy/global'])
+    wrapper.unmount()
+  })
+
+  it('生成链接后把授权地址渲染为二维码，切换站点后二维码随之作废', async () => {
+    const authUrl = 'https://www.workbuddy.cn/login?platform=CLI&state=st-1'
+    startMock.mockResolvedValue({ state: 'st-1', auth_url: authUrl })
+    pollMock.mockResolvedValue({ status: 'pending' })
+
+    const { wrapper } = mountFlow()
+    await wrapper.find('[data-testid="codebuddy-generate-link"]').trigger('click')
+    await flushPromises()
+
+    // 二维码内容必须就是授权链接本身：对方扫码打开的是同一个 state 的授权页。
+    expect(qrMock).toHaveBeenCalledWith(authUrl, expect.any(Object))
+    const img = wrapper.get('[data-testid="codebuddy-auth-qr-image"]')
+    expect(img.attributes('src')).toBe(`data:image/png;base64,QR(${authUrl})`)
+    expect(wrapper.get('[data-testid="codebuddy-auth-qr-download"]').attributes('download')).toBe(
+      'workbuddy-login-china.png'
+    )
+
+    await wrapper.find('[data-testid="codebuddy-site-workbuddy/global"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="codebuddy-auth-qr"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
