@@ -322,6 +322,14 @@ export const CODEBUDDY_SITES: readonly CodeBuddySite[] = [
   { product: 'workbuddy', region: 'global', domain: 'www.workbuddy.ai', labelKey: 'workbuddyIntl' }
 ] as const
 
+/**
+ * 新建账号时可选的站点。CodeBuddy 与 WorkBuddy 是同一套账号体系，新建入口只保留
+ * WorkBuddy（大陆 / 国际）；存量 CodeBuddy 账号仍按原站点工作，编辑页照常展示全部站点。
+ */
+export const CREATABLE_CODEBUDDY_SITES: readonly CodeBuddySite[] = CODEBUDDY_SITES.filter(
+  (site) => site.product === 'workbuddy'
+)
+
 /** 站点在 UI 中的唯一标识（用于 v-model）。 */
 export function codeBuddySiteKey(product: string, region: string): string {
   return `${product}/${region}`
@@ -335,6 +343,9 @@ export function codeBuddySite(
   const found = CODEBUDDY_SITES.find((site) => site.product === product && site.region === region)
   return found ?? CODEBUDDY_SITES[0]
 }
+
+/** 新建账号时默认选中的站点：WorkBuddy 中国大陆。 */
+export const DEFAULT_CREATE_CODEBUDDY_SITE_KEY = codeBuddySiteKey('workbuddy', 'china')
 
 /** 由 UI 标识解析回站点；未知标识回落到大陆 CodeBuddy。 */
 export function codeBuddySiteFromKey(key: string | undefined): CodeBuddySite {
