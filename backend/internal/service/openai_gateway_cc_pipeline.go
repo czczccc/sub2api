@@ -189,6 +189,8 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 放在这个函数里是因为四条 CC 回退路径最终都经过它。
 	if account.IsTencentCodeBuddy() {
 		body = normalizeTencentCodeBuddyUpstreamPayload(body)
+		// 超过模型输出上限的 max_tokens 裁到上限，避免上游直接 400。
+		body = tencentCodeBuddyClampMaxOutputTokens(body, account, s.tencentCodeBuddyMaxOutputOverride(ctx, body))
 		// WorkBuddy 国际版的 chat/completions 端点拒绝 stream=false（HTTP 400，
 		// code 11101）。客户端的标题生成等辅助请求通常是非流式；向上游改为 SSE，
 		// 再在网关内聚合成 JSON，避免把这个上游限制暴露给客户端。

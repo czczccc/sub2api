@@ -60,6 +60,40 @@ func (h *CodeBuddyAuthHandler) RefreshCredits(c *gin.Context) {
 	response.Success(c, gin.H{"extra": updates})
 }
 
+// ModelCapabilities 列出 CodeBuddy / WorkBuddy 模型的生效能力参数（上游快照 / 内置表 / 默认）。
+//
+// GET /admin/accounts/codebuddy/model-capabilities
+func (h *CodeBuddyAuthHandler) ModelCapabilities(c *gin.Context) {
+	accounts, err := h.accountRepo.ListByPlatform(c.Request.Context(), service.PlatformTencentCodeBuddy)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, service.BuildTencentCodeBuddyModelCapabilityReport(accounts))
+}
+
+// RefreshModelCapabilities 从上游重新拉取所有账号的模型能力快照，返回刷新后的报告。
+//
+// POST /admin/accounts/codebuddy/model-capabilities/refresh
+func (h *CodeBuddyAuthHandler) RefreshModelCapabilities(c *gin.Context) {
+	ctx := c.Request.Context()
+	refreshed, failed, err := service.RefreshTencentCodeBuddyModelCapabilities(ctx, h.accountRepo, h.provider.Client())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	accounts, err := h.accountRepo.ListByPlatform(ctx, service.PlatformTencentCodeBuddy)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"refreshed": refreshed,
+		"failed":    failed,
+		"report":    service.BuildTencentCodeBuddyModelCapabilityReport(accounts),
+	})
+}
+
 // Start 生成授权链接。
 func (h *CodeBuddyAuthHandler) Start(c *gin.Context) {
 	session, err := h.provider.StartAuthSession(c.Request.Context(), c.Query("product"), c.Query("region"))

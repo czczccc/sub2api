@@ -114,17 +114,78 @@
         </button>
       </div>
     </template>
+
+    <div class="space-y-3 border-t border-gray-200 pt-5 dark:border-dark-600">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 class="text-base font-semibold text-gray-900 dark:text-white">
+            {{ t('admin.modelCapabilities.codeBuddy.title') }}
+          </h4>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.modelCapabilities.codeBuddy.description') }}
+          </p>
+          <p v-if="codeBuddyReport?.synced_at" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.modelCapabilities.codeBuddy.syncedAt', { time: formatTime(codeBuddyReport.synced_at) }) }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          :disabled="codeBuddyRefreshing"
+          @click="refreshCodeBuddy"
+        >
+          {{ codeBuddyRefreshing ? t('admin.modelCapabilities.codeBuddy.refreshing') : t('admin.modelCapabilities.codeBuddy.refresh') }}
+        </button>
+      </div>
+
+      <div v-if="codeBuddyLoading" class="py-4 text-center text-sm text-gray-500">
+        {{ t('common.loading') }}
+      </div>
+      <div
+        v-else-if="codeBuddyRows.length === 0"
+        class="rounded-lg border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500 dark:border-dark-600"
+      >
+        {{ t('admin.modelCapabilities.codeBuddy.empty') }}
+      </div>
+      <div v-else class="overflow-x-auto">
+        <table class="min-w-full text-left text-sm">
+          <thead class="text-xs text-gray-500 dark:text-gray-400">
+            <tr>
+              <th class="py-2 pr-4 font-medium">{{ t('admin.modelCapabilities.modelId') }}</th>
+              <th class="py-2 pr-4 font-medium">{{ t('admin.modelCapabilities.contextWindow') }}</th>
+              <th class="py-2 pr-4 font-medium">{{ t('admin.modelCapabilities.maxOutputTokens') }}</th>
+              <th class="py-2 pr-4 font-medium">{{ t('admin.modelCapabilities.codeBuddy.vision') }}</th>
+              <th class="py-2 pr-4 font-medium">{{ t('admin.modelCapabilities.codeBuddy.source') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-dark-700 dark:text-gray-300">
+            <tr v-for="row in codeBuddyRows" :key="row.model_id">
+              <td class="py-2 pr-4 font-mono">{{ row.model_id }}</td>
+              <td class="py-2 pr-4">{{ formatTokens(row.context_window) }}</td>
+              <td class="py-2 pr-4">{{ formatTokens(row.max_output_tokens) }}</td>
+              <td class="py-2 pr-4">
+                {{ row.supports_images === false ? t('admin.modelCapabilities.codeBuddy.no') : t('admin.modelCapabilities.codeBuddy.yes') }}
+              </td>
+              <td class="py-2 pr-4 text-xs">{{ t(`admin.modelCapabilities.codeBuddy.sources.${row.source}`) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import {
   getModelCapabilities,
   updateModelCapabilities,
+  getCodeBuddyModelCapabilities,
+  refreshCodeBuddyModelCapabilities,
+  type CodeBuddyModelCapabilityReport,
   MODEL_CAPABILITY_MODALITIES,
   type ModelCapabilityEntry
 } from '@/api/admin/modelCapabilities'
@@ -228,5 +289,74 @@ const save = async () => {
   }
 }
 
-onMounted(load)
+const codeBuddyReport = ref<CodeBuddyModelCapabilityReport | null>(null)
+const codeBuddyLoading = ref(true)
+const codeBuddyRefreshing = ref(false)
+
+/** 生效值 = 后台覆盖（逐字段）> 上游快照 / 内置表 / 默认。 */
+const codeBuddyRows = computed(() =>
+  (codeBuddyReport.value?.models ?? []).map(row => {
+    const override = entries.value.find(
+      entry =>
+        (entry.platform === 'codebuddy' || entry.platform === '') &&
+        entry.model_id.trim() === row.model_id
+    )
+    if (!override) return row
+    const modalities = override.input_modalities ?? []
+    const overridden =
+      !!override.context_window || !!override.max_output_tokens || modalities.length > 0
+    return {
+      ...row,
+      context_window: override.context_window || row.context_window,
+      max_output_tokens: override.max_output_tokens || row.max_output_tokens,
+      supports_images: modalities.length > 0 ? modalities.includes('image') : row.supports_images,
+      source: overridden ? 'override' : row.source
+    }
+  })
+)
+
+const formatTokens = (value?: number) => (value && value > 0 ? value.toLocaleString() : '-')
+
+const formatTime = (value: string) => {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+const loadCodeBuddy = async () => {
+  codeBuddyLoading.value = true
+  try {
+    codeBuddyReport.value = await getCodeBuddyModelCapabilities()
+  } catch {
+    codeBuddyReport.value = null
+  } finally {
+    codeBuddyLoading.value = false
+  }
+}
+
+const refreshCodeBuddy = async () => {
+  codeBuddyRefreshing.value = true
+  try {
+    const result = await refreshCodeBuddyModelCapabilities()
+    codeBuddyReport.value = result.report
+    appStore.showSuccess(
+      t('admin.modelCapabilities.codeBuddy.refreshDone', {
+        refreshed: result.refreshed,
+        failed: result.failed
+      })
+    )
+  } catch (error) {
+    appStore.showError(
+      t('admin.modelCapabilities.codeBuddy.refreshFailed', {
+        message: error instanceof Error ? error.message : ''
+      })
+    )
+  } finally {
+    codeBuddyRefreshing.value = false
+  }
+}
+
+onMounted(() => {
+  load()
+  loadCodeBuddy()
+})
 </script>

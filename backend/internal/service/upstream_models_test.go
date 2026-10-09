@@ -1223,7 +1223,7 @@ func TestFetchUpstreamSupportedModelsUsesCodeBuddyDedicatedEndpoint(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, []string{"glm-5.3", "hy3", "kimi-k3-1"}, models)
 
-	require.Len(t, upstream.requests, 1)
+	require.Len(t, upstream.requests, 2) // 目录 + 补拉能力参数的 /v3/config
 	req := upstream.requests[0]
 	// 主路径是官方客户端使用的 /v2/enterprises/personal/models。
 	require.Equal(t, "https://copilot.tencent.com/v2/enterprises/personal/models", req.URL.String())
@@ -1326,7 +1326,9 @@ func TestFetchUpstreamSupportedModelsCodeBuddyRefreshesExpiredToken(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, []string{"hy3"}, models)
 
-	require.Len(t, upstream.requests, 3)
+	// 第 4 个请求是目录未带能力字段时补拉的 /v3/config（尽力而为，失败不影响结果）。
+	require.Len(t, upstream.requests, 4)
+	require.Equal(t, tencentCodeBuddyAPIHost+tencentCodeBuddyProductConfigPath, upstream.requests[3].URL.String())
 	require.Equal(t, tencentCodeBuddyAPIRoot+tencentCodeBuddyTokenRefreshPath, upstream.requests[1].URL.String())
 	require.Equal(t, "cb-refresh-1", upstream.requests[1].Header.Get("X-Refresh-Token"))
 	require.Equal(t, "Bearer cb-fresh-token", upstream.requests[2].Header.Get("Authorization"))
@@ -1367,9 +1369,12 @@ func TestSyncUpstreamModelCatalogSkipsCapabilityWarningForCodeBuddy(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, []string{"glm-5.3", "hy3"}, catalog.Models)
 	require.Empty(t, catalog.Warnings)
-	// 只有一次上游请求：没有额外的 models.dev 注册表查询。
-	require.Len(t, upstream.requests, 1)
-	require.NotEqual(t, modelsDevRegistryURL, upstream.requests[0].URL.String())
+	// 目录 + 补拉能力参数的 /v3/config，没有额外的 models.dev 注册表查询。
+	require.Len(t, upstream.requests, 2)
+	for _, req := range upstream.requests {
+		require.NotEqual(t, modelsDevRegistryURL, req.URL.String())
+	}
+	require.Equal(t, tencentCodeBuddyAPIHost+tencentCodeBuddyProductConfigPath, upstream.requests[1].URL.String())
 	// 能力不完整时不落盘快照（与既有语义一致）。
 	require.Empty(t, repo.updates)
 }

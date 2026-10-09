@@ -1196,7 +1196,8 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		} else if len(source) == 0 {
 			source = defaultModelIDsForPlatform(platform)
 		}
-		writeCodeBuddyModelsList(c, source, h.codeBuddyModelCapabilityResolver(c, platform))
+		writeCodeBuddyModelsList(c, source, h.codeBuddyModelCapabilityResolver(c, platform),
+			h.gatewayService.ResolveTencentCodeBuddyModelCapabilities(c.Request.Context(), groupID, source))
 		return
 	}
 
@@ -1418,12 +1419,22 @@ type codeBuddyModelArchitecture struct {
 	OutputModalities []string `json:"output_modalities"`
 }
 
+// codeBuddyModelTopProvider 是 OpenRouter 风格的上游限制块，部分客户端（Cline 系、
+// Cherry Studio 等）从这里读最大输出。
+type codeBuddyModelTopProvider struct {
+	ContextLength       int64 `json:"context_length,omitempty"`
+	MaxCompletionTokens int64 `json:"max_completion_tokens,omitempty"`
+}
+
 type codeBuddyModelListItem struct {
 	claude.Model
 	InputModalities []string                    `json:"input_modalities,omitempty"`
 	Architecture    *codeBuddyModelArchitecture `json:"architecture,omitempty"`
 	ContextWindow   int64                       `json:"context_window,omitempty"`
 	MaxOutputTokens int64                       `json:"max_output_tokens,omitempty"`
+	// ContextLength 与 TopProvider 是同一组数值的 OpenRouter 写法。
+	ContextLength int64                      `json:"context_length,omitempty"`
+	TopProvider   *codeBuddyModelTopProvider `json:"top_provider,omitempty"`
 }
 
 // codeBuddyModelCreatedAt 与其它非 OpenAI 平台的占位时间保持一致。
@@ -1433,13 +1444,16 @@ const codeBuddyModelCreatedAt = "2024-01-01T00:00:00Z"
 //
 // 为什么需要专门的 writer：非 openai/grok 平台默认复用 claude.Model，只有
 // id/type/display_name/created_at 四个字段，客户端读不到任何能力信息，于是
-// 就算上游支持图片也不会把图片发出来。能力值优先取管理员在
-// 「模型能力覆盖」里配置的条目，未配置时输入模态回落到平台默认值，
-// 上下文窗口/输出上限则留空（不猜数字）。
+// 就算上游支持图片也不会把图片发出来。
+//
+// 每个字段独立按优先级取值：管理员「模型能力覆盖」> 账号上游快照 / 内置参数表
+// （upstream，由 service 层按分组聚合）> 平台默认（输入模态 text+image，
+// 上下文与输出上限留空，不猜数字）。
 func writeCodeBuddyModelsList(
 	c *gin.Context,
 	modelIDs []string,
 	resolve func(modelID string) (service.ModelCapabilityEntry, bool),
+	upstream map[string]service.TencentCodeBuddyModelCapability,
 ) {
 	models := make([]codeBuddyModelListItem, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
@@ -1452,18 +1466,39 @@ func writeCodeBuddyModelsList(
 			},
 			InputModalities: append([]string(nil), service.CodeBuddyDefaultInputModalities()...),
 		}
+		if capability, ok := upstream[modelID]; ok {
+			if modalities := capability.InputModalities(); len(modalities) > 0 {
+				item.InputModalities = modalities
+			}
+			item.ContextWindow = capability.ContextWindow
+			item.MaxOutputTokens = capability.MaxOutputTokens
+			if name := strings.TrimSpace(capability.DisplayName); name != "" {
+				item.DisplayName = name
+			}
+		}
 		if resolve != nil {
 			if entry, ok := resolve(modelID); ok {
 				if len(entry.InputModalities) > 0 {
 					item.InputModalities = entry.InputModalities
 				}
-				item.ContextWindow = entry.ContextWindow
-				item.MaxOutputTokens = entry.MaxOutputTokens
+				if entry.ContextWindow > 0 {
+					item.ContextWindow = entry.ContextWindow
+				}
+				if entry.MaxOutputTokens > 0 {
+					item.MaxOutputTokens = entry.MaxOutputTokens
+				}
 			}
 		}
 		item.Architecture = &codeBuddyModelArchitecture{
 			InputModalities:  item.InputModalities,
 			OutputModalities: []string{"text"},
+		}
+		item.ContextLength = item.ContextWindow
+		if item.ContextWindow > 0 || item.MaxOutputTokens > 0 {
+			item.TopProvider = &codeBuddyModelTopProvider{
+				ContextLength:       item.ContextWindow,
+				MaxCompletionTokens: item.MaxOutputTokens,
+			}
 		}
 		models = append(models, item)
 	}

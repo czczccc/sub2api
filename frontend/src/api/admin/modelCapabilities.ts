@@ -39,3 +39,38 @@ export async function updateModelCapabilities(
 
 /** 输入模态白名单，与后端 modelCapabilityInputModalities 保持一致。 */
 export const MODEL_CAPABILITY_MODALITIES = ['text', 'image', 'audio', 'video'] as const
+
+/** CodeBuddy / WorkBuddy 模型生效参数（未叠加后台覆盖）。 */
+export interface CodeBuddyModelCapabilityRow {
+  model_id: string
+  context_window?: number
+  max_output_tokens?: number
+  supports_images?: boolean
+  /** upstream=上游快照，builtin=内置参数表，default=平台默认 */
+  source: 'upstream' | 'builtin' | 'default'
+}
+
+export interface CodeBuddyModelCapabilityReport {
+  models: CodeBuddyModelCapabilityRow[]
+  synced_at?: string
+}
+
+export async function getCodeBuddyModelCapabilities(): Promise<CodeBuddyModelCapabilityReport> {
+  const { data } = await apiClient.get<CodeBuddyModelCapabilityReport>(
+    '/admin/accounts/codebuddy/model-capabilities'
+  )
+  return data
+}
+
+export async function refreshCodeBuddyModelCapabilities(): Promise<{
+  refreshed: number
+  failed: number
+  report: CodeBuddyModelCapabilityReport
+}> {
+  const { data } = await apiClient.post<{
+    refreshed: number
+    failed: number
+    report: CodeBuddyModelCapabilityReport
+  }>('/admin/accounts/codebuddy/model-capabilities/refresh')
+  return data
+}

@@ -377,6 +377,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/codebuddy/auth/state", h.Admin.CodeBuddyAuth.Start)
 		accounts.GET("/codebuddy/auth/poll", h.Admin.CodeBuddyAuth.Poll)
 		accounts.POST("/:id/codebuddy/credits/refresh", h.Admin.CodeBuddyAuth.RefreshCredits)
+		accounts.GET("/codebuddy/model-capabilities", h.Admin.CodeBuddyAuth.ModelCapabilities)
+		accounts.POST("/codebuddy/model-capabilities/refresh", h.Admin.CodeBuddyAuth.RefreshModelCapabilities)
 		accounts.POST("/import/codex-session", h.Admin.Account.ImportCodexSession)
 		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)

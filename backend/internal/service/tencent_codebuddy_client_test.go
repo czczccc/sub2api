@@ -811,7 +811,9 @@ func TestFetchTencentCodeBuddyUpstreamModels_WorkBuddyUsesRealCatalog(t *testing
 	models, err := svc.fetchTencentCodeBuddyUpstreamModels(context.Background(), workBuddyIntlTestAccount())
 	require.NoError(t, err)
 	require.Equal(t, []string{"default-model", "gemini-3.5-flash", "glm-5.3", "gpt-5.6-sol"}, models)
-	require.Len(t, upstream.requests, 1)
+	// 目录里部分模型没带能力字段，会再补拉一次 /v3/config。
+	require.Len(t, upstream.requests, 2)
+	require.Equal(t, "https://www.workbuddy.ai"+tencentCodeBuddyProductConfigPath, upstream.requests[1].URL.String())
 }
 
 // TestFetchModels_UsesV2PathFirst 锁定真实站点差异的修复：官方客户端用的是
