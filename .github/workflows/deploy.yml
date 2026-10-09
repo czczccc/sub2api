@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+# 同一时间只跑一个部署：后一次排队等前一次结束，避免两次 docker build 在 VPS 上抢资源。
+concurrency:
+  group: deploy-tokyo-vps
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -14,7 +19,7 @@ jobs:
           host: 207.148.92.152
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 30m
+          command_timeout: 60m
           script: |
             cd /opt/sub2api
             git pull origin main
