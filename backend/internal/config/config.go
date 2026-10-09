@@ -1132,6 +1132,19 @@ type GatewayConfig struct {
 	// CNProviders: 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）的余额检测配置。
 	// 仅作用于 payg（按量付费）账号：周期探测余额，低于阈值则临时停调。
 	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
+
+	// CodeBuddy: 腾讯 CodeBuddy / WorkBuddy 账号的周期任务配置（每日自动签到）。
+	CodeBuddy GatewayCodeBuddyConfig `mapstructure:"codebuddy"`
+}
+
+// GatewayCodeBuddyConfig 腾讯 CodeBuddy / WorkBuddy 账号的每日自动签到配置。
+//
+//   - auto_checkin_enabled: 是否启用每日自动签到（默认 true；单账号可在 extra 中关闭）
+//   - auto_checkin_interval_minutes: 签到巡检周期（分钟，默认 180）。当天已签到的
+//     账号不会重复请求，周期只决定"漏签"后多久补上
+type GatewayCodeBuddyConfig struct {
+	AutoCheckinEnabled         bool `mapstructure:"auto_checkin_enabled"`
+	AutoCheckinIntervalMinutes int  `mapstructure:"auto_checkin_interval_minutes"`
 }
 
 // GatewayGrokConfig holds Grok-specific gateway scheduling knobs.
@@ -2514,6 +2527,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.cn_providers.balance_check_enabled", true)
 	viper.SetDefault("gateway.cn_providers.balance_threshold", 0.5)
 	viper.SetDefault("gateway.cn_providers.balance_check_interval_minutes", 10)
+	viper.SetDefault("gateway.codebuddy.auto_checkin_enabled", true)
+	viper.SetDefault("gateway.codebuddy.auto_checkin_interval_minutes", 180)
 	viper.SetDefault("gateway.image_concurrency.enabled", false)
 	viper.SetDefault("gateway.image_concurrency.max_concurrent_requests", 0)
 	viper.SetDefault("gateway.image_concurrency.overflow_mode", ImageConcurrencyOverflowModeReject)

@@ -822,6 +822,8 @@ Antigravity 账户支持可选的**混合调度**功能。开启后，通用端�
 
 上下文窗口与输出上限没有上游来源，由管理员在**系统设置 → 模型能力**中手工声明。
 
+**每日自动签到** —— 后台任务用账号已存的 access_token 领取 WorkBuddy / CodeBuddy 每日签到积分（接口取自 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)）：先查状态、未签才领，当天已签的账号不再请求。单账号可在编辑页关闭，上次结果也显示在那里；全局开关与巡检周期见 `gateway.codebuddy.auto_checkin_enabled`（默认开）与 `gateway.codebuddy.auto_checkin_interval_minutes`（默认 180）。
+
 > **客户端注意**：网关虽然会声明 `input_modalities` 与推理档位，但**自带模型能力表**
 > 的客户端（DSH、pi 等）仍会拦截图片、隐藏思考档位菜单，直到在本机配置里做同样的
 > 声明。详见 [CodeBuddy 客户端接入说明](docs/CODEBUDDY_CLIENT_SETUP.md)。
