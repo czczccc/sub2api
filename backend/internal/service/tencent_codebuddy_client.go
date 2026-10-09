@@ -99,10 +99,19 @@ func (c *TencentCodeBuddyClient) ApplyIdentityHeaders(h http.Header, cred Tencen
 		h.Set("X-Machine-ID", tencentCodeBuddyStableID(cred.UserID, "machine"))
 		h.Set("X-Session-ID", tencentCodeBuddyStableID(cred.UserID, "session"))
 	}
-	h.Set("X-Domain", cred.Endpoint().Domain)
 	if cred.UserID != "" {
 		h.Set("X-User-Id", cred.UserID)
 	}
+	if isTencentWorkBuddyGlobal(cred) {
+		// 国际版对齐官方国际客户端：同域 Origin/Referer，固定声明国际版域与"无企业"，
+		// 不沿用登录返回的 domain / enterprise_id（参考实现 injectGlobalChatHeaders）。
+		h.Set("Origin", tencentWorkBuddyAPIHostIntl)
+		h.Set("Referer", tencentWorkBuddyAPIHostIntl+"/")
+		h.Set("X-Domain", tencentWorkBuddyDomainIntl)
+		h.Set("X-No-Enterprise-Id", "1")
+		return
+	}
+	h.Set("X-Domain", cred.Endpoint().Domain)
 	if cred.EnterpriseID != "" {
 		h.Set("X-Enterprise-Id", cred.EnterpriseID)
 		h.Set("X-Tenant-Id", cred.EnterpriseID)

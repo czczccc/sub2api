@@ -103,6 +103,8 @@ func tencentCodeBuddyGatewayHint(status int, body []byte) string {
 		return "this model is not available on the selected account; switch model or retry"
 	case code == "6004":
 		return "model usage limit reached; retry after reset or switch model"
+	case code == "14017" || strings.Contains(lower, "trial not activated"):
+		return "WorkBuddy global account is not activated yet; the gateway activates it automatically, retry in a minute"
 	case code == "14018" || status == http.StatusPaymentRequired:
 		return "account credits exhausted; waiting for daily check-in to restore"
 	}

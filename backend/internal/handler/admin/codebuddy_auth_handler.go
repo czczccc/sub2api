@@ -145,11 +145,21 @@ func (h *CodeBuddyAuthHandler) Poll(c *gin.Context) {
 	if credential.Domain != "" {
 		credentials["domain"] = credential.Domain
 	}
-	response.Success(c, gin.H{
+	data := gin.H{
 		"status":      "ready",
 		"credentials": credentials,
 		"nickname":    result.Nickname,
-	})
+	}
+	// WorkBuddy 国际版新账号要先注册激活，否则对话报 14017 trial not activated。
+	// 激活失败不影响登录结果，只在返回里带上原因。
+	if credential.Product == service.TencentCodeBuddyProductWorkBuddy && credential.Region == service.TencentCodeBuddyRegionGlobal {
+		if message, err := h.provider.ActivateWorkBuddyGlobalCredential(c.Request.Context(), credential); err != nil {
+			data["activation_error"] = err.Error()
+		} else {
+			data["activation"] = message
+		}
+	}
+	response.Success(c, data)
 }
 
 // RunDailyTask 立即在后台执行一次日常保号任务（activity/streak/travel/nickname/balance）。

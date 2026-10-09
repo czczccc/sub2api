@@ -75,6 +75,7 @@ func (s *TencentCodeBuddyDailyTaskService) Start() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		s.activateGlobalAccounts()
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for {
@@ -122,6 +123,13 @@ func (s *TencentCodeBuddyDailyTaskService) tick() {
 		if due {
 			go func(task string) { _, _ = s.Run(context.Background(), task) }(task)
 		}
+	}
+	s.mu.Lock()
+	globalDue := s.lastSlot["global_activate"] != slot
+	s.lastSlot["global_activate"] = slot
+	s.mu.Unlock()
+	if globalDue {
+		go s.activateGlobalAccounts()
 	}
 	if !cfg.BalanceRefreshDisabled {
 		s.mu.Lock()
@@ -247,6 +255,49 @@ func (s *TencentCodeBuddyDailyTaskService) RunInBackground(task string) error {
 		log.Printf("[CodeBuddyTasks] manual %s done: accounts=%d ok=%d failed=%d", task, summary.Accounts, summary.Succeeded, summary.Failed)
 	}()
 	return nil
+}
+
+// tencentCodeBuddyExtraGlobalActivated 标记 WorkBuddy 国际版账号已完成注册激活。
+const tencentCodeBuddyExtraGlobalActivated = "codebuddy_global_activated"
+
+// activateGlobalAccounts 为尚未激活的 WorkBuddy 国际版账号补做注册激活（启动时与每小时一次）。
+// 老账号或登录时激活失败的账号由这里兜底，否则对话会一直报 14017 trial not activated。
+func (s *TencentCodeBuddyDailyTaskService) activateGlobalAccounts() {
+	if s == nil || s.accountRepo == nil || s.client == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	accounts, err := s.accountRepo.ListByPlatform(ctx, PlatformTencentCodeBuddy)
+	if err != nil {
+		return
+	}
+	for i := range accounts {
+		account := &accounts[i]
+		cred := account.TencentCodeBuddyCredential()
+		if !account.IsActive() || !cred.HasAccessToken() || !isTencentWorkBuddyGlobal(cred) {
+			continue
+		}
+		if done, _ := account.Extra[tencentCodeBuddyExtraGlobalActivated].(bool); done {
+			continue
+		}
+		accountCtx, cancelAccount := context.WithTimeout(ctx, time.Minute)
+		message, err := s.client.ActivateWorkBuddyGlobal(accountCtx, account)
+		cancelAccount()
+		updates := map[string]any{}
+		if err != nil {
+			message = truncateString(err.Error(), 300)
+			log.Printf("[CodeBuddyTasks] global activate account %d: %s", account.ID, message)
+		} else {
+			updates[tencentCodeBuddyExtraGlobalActivated] = true
+		}
+		updates[tencentCodeBuddyTaskExtraPrefix+"global_activate"] = TencentCodeBuddyTaskResult{
+			At: s.now().UTC().Format(time.RFC3339), OK: err == nil, Message: message,
+		}
+		if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
+			log.Printf("[CodeBuddyTasks] save global activation for account %d: %v", account.ID, err)
+		}
+	}
 }
 
 type tencentCodeBuddyTaskRunner func(ctx context.Context, account *Account) (string, error)

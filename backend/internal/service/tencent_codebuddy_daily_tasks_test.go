@@ -108,3 +108,43 @@ func TestTencentCodeBuddyDailyTasks_RunRejectsUnknownTask(t *testing.T) {
 	svc := NewTencentCodeBuddyDailyTaskService(struct{ AccountRepository }{}, NewTencentCodeBuddyClient(nil), nil)
 	require.Error(t, svc.RunInBackground("bogus"))
 }
+
+func TestActivateWorkBuddyGlobal_SubmitsRegionThenClaimsTrial(t *testing.T) {
+	registered := false
+	upstream := newTencentCodeBuddyTestUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/auth/realms/copilot/overseas/user/register":
+			require.Equal(t, "uid-1", r.URL.Query().Get("userId"))
+			if registered {
+				_, _ = w.Write([]byte(`{"code":200,"msg":"register success"}`))
+			} else {
+				_, _ = w.Write([]byte(`{"code":500,"msg":"region required"}`))
+			}
+		case "/billing/area/get-country-code":
+			_, _ = w.Write([]byte(`{"code":0,"data":"{\"data\":{\"list\":[{\"EnName\":\"Japan\",\"IOS2\":\"JP\",\"Code\":\"81\"},{\"EnName\":\"Singapore\",\"IOS2\":\"SG\",\"Code\":\"65\"}]}}"}`))
+		case "/console/login/account":
+			registered = true
+			_, _ = w.Write([]byte(`{"code":0}`))
+		case "/billing/ide/trial":
+			_, _ = w.Write([]byte(`{"code":14051,"msg":"already"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	account := tencentCodeBuddyTestAccount(map[string]any{
+		tencentCodeBuddyCredProduct: TencentCodeBuddyProductWorkBuddy,
+		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionGlobal,
+	})
+	message, err := NewTencentCodeBuddyClient(upstream).ActivateWorkBuddyGlobal(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, "已补注册地区 SG 并激活", message)
+	var submitted string
+	for _, req := range upstream.requests() {
+		require.True(t, strings.HasPrefix(req.URL, "https://www.workbuddy.ai/"))
+		if strings.HasSuffix(req.URL, "/console/login/account") {
+			submitted = req.Body
+		}
+	}
+	require.Contains(t, submitted, `"countryName":["SG"]`)
+}

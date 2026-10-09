@@ -615,8 +615,11 @@ func TestTencentCodeBuddyClientChatCompletion_RoutesBySite(t *testing.T) {
 	require.Len(t, requests, 1)
 	require.Equal(t, "https://www.workbuddy.ai/v2/chat/completions", requests[0].URL)
 	require.Equal(t, "www.workbuddy.ai", requests[0].Header.Get("X-Domain"))
+	require.Equal(t, "https://www.workbuddy.ai", requests[0].Header.Get("Origin"))
+	require.Equal(t, "1", requests[0].Header.Get("X-No-Enterprise-Id"))
+	require.Empty(t, requests[0].Header.Get("X-Enterprise-Id"), "国际版个人账号不带企业头")
 
-	// 账号级 domain 覆盖只影响 X-Domain，不改变 host。
+	// 国际版固定声明 www.workbuddy.ai，不沿用登录返回的 domain。
 	overridden := tencentCodeBuddyTestAccount(map[string]any{
 		tencentCodeBuddyCredProduct: TencentCodeBuddyProductWorkBuddy,
 		tencentCodeBuddyCredRegion:  TencentCodeBuddyRegionGlobal,
@@ -629,7 +632,7 @@ func TestTencentCodeBuddyClientChatCompletion_RoutesBySite(t *testing.T) {
 	requests = upstream.requests()
 	require.Len(t, requests, 2)
 	require.Equal(t, "https://www.workbuddy.ai/v2/chat/completions", requests[1].URL)
-	require.Equal(t, "tenant.example.com", requests[1].Header.Get("X-Domain"))
+	require.Equal(t, "www.workbuddy.ai", requests[1].Header.Get("X-Domain"))
 
 	// 默认账号（无 product/region）仍打到大陆 CodeBuddy。
 	resp3, err := client.ChatCompletion(context.Background(), tencentCodeBuddyTestAccount(nil), []byte(`{"model":"auto"}`), false)

@@ -156,11 +156,12 @@ func TestCodeBuddyAuthHandler_StartAndPollRouteBySite(t *testing.T) {
 	// domain 未显式返回时不下发，避免把默认值固化。
 	require.NotContains(t, pollBody.Data.Credentials, "domain")
 
-	// 三次上游请求都应打到 workbuddy.ai。
+	// 上游请求都应打到 workbuddy.ai；国际版登录完成后顺带查询注册激活状态。
 	require.Equal(t, []string{
 		"https://www.workbuddy.ai/v2/plugin/auth/state?platform=CLI",
 		"https://www.workbuddy.ai/v2/plugin/auth/token?state=st-1",
 		"https://www.workbuddy.ai/v2/plugin/login/account?state=st-1",
+		"https://www.workbuddy.ai/auth/realms/copilot/overseas/user/register?userId=u-1",
 	}, upstream.requests())
 }
 
