@@ -412,7 +412,12 @@ func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_CodeBuddyAPIKeyIncl
 		Platform:    service.PlatformTencentCodeBuddy,
 		Type:        service.AccountTypeAPIKey,
 		Status:      service.StatusActive,
-		Credentials: map[string]any{"access_token": "at", "refresh_token": "rt"},
+		Credentials: map[string]any{
+			"access_token":  "at",
+			"refresh_token": "rt",
+			"product":       service.TencentCodeBuddyProductWorkBuddy,
+			"region":        service.TencentCodeBuddyRegionChina,
+		},
 	})
 	mustCreateAccount(s.T(), s.client, &service.Account{
 		Name:        "grok-api-key-still-excluded",
