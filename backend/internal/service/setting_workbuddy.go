@@ -37,6 +37,10 @@ type WorkBuddyConfig struct {
 	StreakTask   WorkBuddyTaskSchedule `json:"streak_task"`
 	TravelTask   WorkBuddyTaskSchedule `json:"travel_task"`
 	NicknameTask WorkBuddyTaskSchedule `json:"nickname_task"`
+	// 成长任务：自动完成需要真实对话的成长任务并领取已达标的奖励。
+	GrowthTask WorkBuddyTaskSchedule `json:"growth_task"`
+	// 夜猫子：23:00–08:00 窗口内用 glm-5.2 真实对话补足 black_cat 任务。
+	BlackCatTask WorkBuddyTaskSchedule `json:"blackcat_task"`
 	// 余额定时刷新：积分恢复后自动解除"积分耗尽"暂停。
 	BalanceRefreshDisabled bool `json:"balance_refresh_disabled"`
 	BalanceRefreshMinutes  int  `json:"balance_refresh_minutes"`
@@ -54,6 +58,8 @@ const (
 	WorkBuddyTaskStreak   = "streak"
 	WorkBuddyTaskTravel   = "travel"
 	WorkBuddyTaskNickname = "nickname"
+	WorkBuddyTaskGrowth   = "growth"
+	WorkBuddyTaskBlackCat = "blackcat"
 	WorkBuddyTaskBalance  = "balance"
 )
 
@@ -63,6 +69,8 @@ var workBuddyDefaultTaskHours = map[string][]int{
 	WorkBuddyTaskStreak:   {9, 21},
 	WorkBuddyTaskTravel:   {9, 21},
 	WorkBuddyTaskNickname: {8},
+	WorkBuddyTaskGrowth:   {11},
+	WorkBuddyTaskBlackCat: {23},
 }
 
 const workBuddyDefaultBalanceRefreshMinutes = 5
@@ -96,6 +104,10 @@ func (cfg WorkBuddyConfig) TaskSchedule(task string) WorkBuddyTaskSchedule {
 		return cfg.TravelTask
 	case WorkBuddyTaskNickname:
 		return cfg.NicknameTask
+	case WorkBuddyTaskGrowth:
+		return cfg.GrowthTask
+	case WorkBuddyTaskBlackCat:
+		return cfg.BlackCatTask
 	}
 	return WorkBuddyTaskSchedule{Disabled: true}
 }
@@ -117,6 +129,8 @@ func normalizeWorkBuddyConfig(cfg WorkBuddyConfig) WorkBuddyConfig {
 	cfg.StreakTask = normalizeWorkBuddyTaskSchedule(cfg.StreakTask, WorkBuddyTaskStreak)
 	cfg.TravelTask = normalizeWorkBuddyTaskSchedule(cfg.TravelTask, WorkBuddyTaskTravel)
 	cfg.NicknameTask = normalizeWorkBuddyTaskSchedule(cfg.NicknameTask, WorkBuddyTaskNickname)
+	cfg.GrowthTask = normalizeWorkBuddyTaskSchedule(cfg.GrowthTask, WorkBuddyTaskGrowth)
+	cfg.BlackCatTask = normalizeWorkBuddyTaskSchedule(cfg.BlackCatTask, WorkBuddyTaskBlackCat)
 	if cfg.BalanceRefreshMinutes <= 0 {
 		cfg.BalanceRefreshMinutes = workBuddyDefaultBalanceRefreshMinutes
 	}

@@ -43,6 +43,8 @@ export default {
         streak: '连登管家',
         travel: '猫猫旅行',
         nickname: '昵称同步',
+        growth: '成长任务',
+        blackcat: '夜猫子',
         balance: '余额刷新'
       },
       hints: {
@@ -50,9 +52,28 @@ export default {
         streak: '漏签时用补签卡补昨天，领新手礼包和补偿，兑换已解锁的连登档位，抽完抽奖次数。',
         travel: '没有猫时（当天有对话后）领养，旅行归来领积分，空闲时派出旅行。',
         nickname: '从官网读取账号昵称，显示在账号列表。',
+        growth: '报名全部任务，用真实对话完成对话类任务（对话 5 次、GLM-5.2 对话、领养第一只猫），并领取所有已达标的奖励。其它任务需在官方客户端里完成，完成后会被自动领奖。',
+        blackcat: '北京时间 23:00–08:00 内用 glm-5.2 真实对话补足夜猫子任务次数并领奖；时点请设在这个窗口内。',
         balance: '定时刷新剩余积分；积分恢复后自动解除“积分耗尽”暂停。'
       },
       balanceMinutes: '刷新间隔（分钟）'
+    },
+    taskCenter: {
+      open: '成长任务',
+      title: '成长任务 · {name}',
+      empty: '没有任务',
+      progress: '进度 {current}/{target}',
+      reward: '+{credit} 积分',
+      rewardEnergy: '+{credit} 积分 +{energy} 能量',
+      claimed: '已领取',
+      locked: '未解锁',
+      manual: '需在官方客户端完成',
+      run: '自动完成',
+      claim: '领取',
+      running: '执行中…',
+      loadFailed: '加载任务失败：{message}',
+      actionFailed: '操作失败：{message}',
+      refresh: '刷新'
     }
   }
 }

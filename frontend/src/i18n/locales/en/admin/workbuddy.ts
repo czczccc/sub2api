@@ -43,6 +43,8 @@ export default {
         streak: 'Streak manager',
         travel: 'Cat travel',
         nickname: 'Nickname sync',
+        growth: 'Growth tasks',
+        blackcat: 'Night owl',
         balance: 'Balance refresh'
       },
       hints: {
@@ -50,9 +52,28 @@ export default {
         streak: "Uses a makeup card for a missed yesterday, claims newbie gift and compensation, redeems unlocked streak tiers, and uses all lottery draws.",
         travel: 'Adopts a cat when there is none (after a chat that day), claims rewards on return, and sends the cat travelling when idle.',
         nickname: 'Reads the account nickname from the website and shows it in the account list.',
+        growth: 'Accepts all tasks, completes chat tasks with real chats (5 chats, GLM-5.2 chat, first cat), and claims every reward that is ready. Other tasks must be done in the official client; their rewards are claimed automatically afterwards.',
+        blackcat: 'Between 23:00 and 08:00 Beijing time, tops up the night-owl task with real glm-5.2 chats and claims the reward; set the hours inside that window.',
         balance: 'Refreshes remaining credits periodically; lifts the credits-exhausted pause once credits are back.'
       },
       balanceMinutes: 'Interval (minutes)'
+    },
+    taskCenter: {
+      open: 'Growth tasks',
+      title: 'Growth tasks · {name}',
+      empty: 'No tasks',
+      progress: 'Progress {current}/{target}',
+      reward: '+{credit} credits',
+      rewardEnergy: '+{credit} credits +{energy} energy',
+      claimed: 'Claimed',
+      locked: 'Locked',
+      manual: 'Complete in the official client',
+      run: 'Complete',
+      claim: 'Claim',
+      running: 'Running…',
+      loadFailed: 'Failed to load tasks: {message}',
+      actionFailed: 'Action failed: {message}',
+      refresh: 'Refresh'
     }
   }
 }

@@ -109,7 +109,7 @@ func (s *TencentCodeBuddyDailyTaskService) tick() {
 	cfg := s.config()
 	now := s.now().In(tencentCodeBuddyResetLoc)
 	slot := now.Format("2006-01-02 15")
-	for _, task := range []string{WorkBuddyTaskStreak, WorkBuddyTaskTravel, WorkBuddyTaskActivity, WorkBuddyTaskNickname} {
+	for _, task := range []string{WorkBuddyTaskStreak, WorkBuddyTaskTravel, WorkBuddyTaskActivity, WorkBuddyTaskNickname, WorkBuddyTaskGrowth, WorkBuddyTaskBlackCat} {
 		schedule := cfg.TaskSchedule(task)
 		if schedule.Disabled || !containsHour(schedule.Hours, now.Hour()) {
 			continue
@@ -209,7 +209,11 @@ func (s *TencentCodeBuddyDailyTaskService) Run(ctx context.Context, task string)
 		}
 		first = false
 		summary.Accounts++
-		accountCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		timeout := 2 * time.Minute
+		if task == WorkBuddyTaskGrowth || task == WorkBuddyTaskBlackCat {
+			timeout = 8 * time.Minute // 含多次真实对话与进度回读
+		}
+		accountCtx, cancel := context.WithTimeout(ctx, timeout)
 		message, runErr := runner(accountCtx, account)
 		cancel()
 		result := TencentCodeBuddyTaskResult{At: s.now().UTC().Format(time.RFC3339), OK: runErr == nil, Message: message}
@@ -314,6 +318,10 @@ func (s *TencentCodeBuddyDailyTaskService) runner(task string) tencentCodeBuddyT
 		return s.runNickname
 	case WorkBuddyTaskBalance:
 		return s.runBalance
+	case WorkBuddyTaskGrowth:
+		return s.runGrowth
+	case WorkBuddyTaskBlackCat:
+		return s.runBlackCat
 	}
 	return nil
 }

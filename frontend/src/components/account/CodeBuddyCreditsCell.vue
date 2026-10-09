@@ -36,7 +36,22 @@
         </svg>
         {{ t('admin.accounts.codebuddy.credits.refresh') }}
       </button>
+      <button
+        v-if="growthSupported"
+        type="button"
+        data-test="codebuddy-task-center-open"
+        class="whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium leading-4 text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        @click="taskCenterOpen = true"
+      >
+        {{ t('admin.workbuddySettings.taskCenter.open') }}
+      </button>
     </div>
+    <CodeBuddyTaskCenterModal
+      v-if="growthSupported && taskCenterOpen"
+      :show="taskCenterOpen"
+      :account="account"
+      @close="taskCenterOpen = false"
+    />
     <div
       v-if="nickname"
       data-test="codebuddy-nickname"
@@ -79,6 +94,7 @@ import { adminAPI } from '@/api/admin'
 import type { Account } from '@/types'
 import { formatDateTime } from '@/utils/format'
 import { codeBuddyCreditsSupported } from './credentialsBuilder'
+import CodeBuddyTaskCenterModal from './CodeBuddyTaskCenterModal.vue'
 
 const props = defineProps<{
   account: Account
@@ -92,6 +108,14 @@ const { t } = useI18n()
 
 const visible = computed(() => codeBuddyCreditsSupported(props.account))
 const loading = ref(false)
+const taskCenterOpen = ref(false)
+// 成长任务只有 WorkBuddy 中国大陆个人账号有（企业账号上游一律 403）。
+const growthSupported = computed(() => {
+  const credentials = (props.account.credentials ?? {}) as Record<string, unknown>
+  const product = typeof credentials.product === 'string' ? credentials.product.trim().toLowerCase() : ''
+  const enterprise = typeof credentials.enterprise_id === 'string' ? credentials.enterprise_id.trim() : ''
+  return visible.value && product === 'workbuddy' && !enterprise
+})
 const requestError = ref<string | null>(null)
 
 const extra = computed(() => (props.account.extra ?? {}) as Record<string, unknown>)
@@ -120,7 +144,7 @@ const checkedAtTitle = computed(() => {
 
 const nickname = computed(() => stringField('codebuddy_nickname'))
 
-const DAILY_TASKS = ['activity', 'streak', 'travel', 'nickname'] as const
+const DAILY_TASKS = ['activity', 'streak', 'travel', 'nickname', 'growth', 'blackcat'] as const
 const taskResults = computed(() =>
   DAILY_TASKS.flatMap((task) => {
     const raw = extra.value[`codebuddy_task_${task}`]

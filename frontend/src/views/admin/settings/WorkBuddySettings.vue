@@ -173,6 +173,8 @@ const config = ref<WorkBuddyConfig>({
   streak_task: emptySchedule(),
   travel_task: emptySchedule(),
   nickname_task: emptySchedule(),
+  growth_task: emptySchedule(),
+  blackcat_task: emptySchedule(),
   balance_refresh_disabled: false,
   balance_refresh_minutes: 5
 })
@@ -181,7 +183,9 @@ const hoursText = ref<Record<WorkBuddyScheduledTask, string>>({
   activity: '',
   streak: '',
   travel: '',
-  nickname: ''
+  nickname: '',
+  growth: '',
+  blackcat: ''
 })
 
 const schedule = (task: WorkBuddyScheduledTask): WorkBuddyTaskSchedule => config.value[`${task}_task`]
