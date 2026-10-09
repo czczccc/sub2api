@@ -308,7 +308,7 @@ func (s *OpenAIGatewayService) bufferWorkBuddyStreamResponse(c *gin.Context, res
 			tooLarge = true
 			return
 		}
-		dst.WriteString(value)
+		_, _ = dst.WriteString(value)
 	}
 	state := s.scanCCStream(c, resp, "workbuddy buffered chat completion", requestID, time.Now(), func(chunk *apicompat.ChatCompletionsChunk) {
 		if chunk.ID != "" {
