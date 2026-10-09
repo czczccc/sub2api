@@ -286,7 +286,8 @@ type tencentCodeBuddyCheckinner interface {
 //   - 跳过非 active、缺 access_token、extra.codebuddy_auto_checkin=false 的账号；
 //   - 今天（北京时间）已记录 claimed/already 的账号不再请求；
 //   - 其余账号先查状态、未签才领，结果写回 extra 供后台展示；
-//   - 签到之后为所有 active 的大陆站账号刷新一次剩余积分（不受自动签到开关影响）。
+//   - 签到之后为所有 active 的大陆站账号刷新一次剩余积分（不受自动签到开关影响）；
+//   - 最后为所有 active 账号刷新一次模型能力快照。
 //
 // 多实例部署时可能重复查询，但上游接口幂等，不会重复领取。
 type TencentCodeBuddyCheckinService struct {
@@ -377,6 +378,32 @@ func (s *TencentCodeBuddyCheckinService) runOnce() {
 		log.Printf("[CodeBuddyCheckin] claimed=%d failed=%d", claimed, failed)
 	}
 	s.refreshCredits(accounts)
+	s.refreshModelCapabilities(accounts)
+}
+
+// refreshModelCapabilities 为 active 账号刷新模型能力快照（上下文/输出上限/识图）；
+// 失败只记日志。客户端不支持目录拉取（测试替身）时跳过。
+func (s *TencentCodeBuddyCheckinService) refreshModelCapabilities(accounts []Account) {
+	fetcher, ok := s.client.(tencentCodeBuddyCatalogFetcher)
+	if !ok {
+		return
+	}
+	failed := 0
+	for i := range accounts {
+		account := &accounts[i]
+		if !account.IsActive() || !account.TencentCodeBuddyCredential().HasAccessToken() {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		if err := refreshTencentCodeBuddyModelCapabilities(ctx, s.accountRepo, fetcher, account); err != nil {
+			failed++
+			log.Printf("[CodeBuddyCheckin] refresh model capabilities for account %d: %v", account.ID, err)
+		}
+		cancel()
+	}
+	if failed > 0 {
+		log.Printf("[CodeBuddyCheckin] model capabilities refresh failed=%d", failed)
+	}
 }
 
 // refreshCredits 为 active 且支持积分查询的账号刷新剩余积分；失败只记日志，结果写入 extra。

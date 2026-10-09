@@ -147,6 +147,9 @@ func (c *TencentCodeBuddyClient) do(
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := c.httpUpstream.Do(req, proxyURL, account.ID, maxInt(account.Concurrency, 1))
+	if err == nil && resp == nil {
+		err = infraerrors.New(http.StatusBadGateway, "TENCENT_CODEBUDDY_EMPTY_RESPONSE", "upstream returned no response")
+	}
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -194,35 +197,42 @@ func (c *TencentCodeBuddyClient) FetchModels(ctx context.Context, account *Accou
 // 令牌失效（401/403）不再尝试第二个路径：那说明凭据有问题，换路径也是一样的结果，
 // 还会把一次明确的鉴权错误拖成两次往返。
 func (c *TencentCodeBuddyClient) fetchModels(ctx context.Context, account *Account) ([]string, int, error) {
+	models, _, status, err := c.fetchModelsWithCapabilities(ctx, account)
+	return models, status, err
+}
+
+// fetchModelsWithCapabilities 与 fetchModels 相同，额外返回目录响应里解析到的模型能力参数
+// （上游未给出时为 nil）。
+func (c *TencentCodeBuddyClient) fetchModelsWithCapabilities(ctx context.Context, account *Account) ([]string, map[string]TencentCodeBuddyModelCapability, int, error) {
 	if err := c.requireAccount(account); err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	cred := account.TencentCodeBuddyCredential()
 	if !cred.HasAccessToken() {
-		return nil, 0, infraerrors.New(http.StatusBadRequest, "TENCENT_CODEBUDDY_MISSING_ACCESS_TOKEN",
+		return nil, nil, 0, infraerrors.New(http.StatusBadRequest, "TENCENT_CODEBUDDY_MISSING_ACCESS_TOKEN",
 			"credentials.access_token is required")
 	}
 	// 模型目录挂在站点根（不是 /v2 之外的某个前缀），因此用 Host（不含 /v2）而非
 	// BaseURL；且必须按凭据的 product × region 取站点，否则国际版账号会打到大陆站。
 	host := strings.TrimRight(cred.Endpoint().Host, "/")
 
-	models, status, err := c.fetchModelsAt(ctx, account, cred, host+tencentCodeBuddyModelsPath)
+	models, capabilities, status, err := c.fetchModelsAt(ctx, account, cred, host+tencentCodeBuddyModelsPath)
 	if err == nil && len(models) > 0 {
-		return models, status, nil
+		return models, capabilities, status, nil
 	}
 	if tencentCodeBuddyTokenExpiredStatus(status) {
-		return models, status, err
+		return models, capabilities, status, err
 	}
 
-	legacyModels, legacyStatus, legacyErr := c.fetchModelsAt(ctx, account, cred, host+tencentCodeBuddyModelsPathLegacy)
+	legacyModels, legacyCapabilities, legacyStatus, legacyErr := c.fetchModelsAt(ctx, account, cred, host+tencentCodeBuddyModelsPathLegacy)
 	if legacyErr == nil && len(legacyModels) > 0 {
-		return legacyModels, legacyStatus, nil
+		return legacyModels, legacyCapabilities, legacyStatus, nil
 	}
 	if legacyErr != nil {
 		// 两个路径都失败：上报兜底路径的错误（含状态码），让同步层能正确分类。
-		return legacyModels, legacyStatus, legacyErr
+		return legacyModels, legacyCapabilities, legacyStatus, legacyErr
 	}
-	return models, status, err
+	return models, capabilities, status, err
 }
 
 // fetchModelsAt 打一次目录接口并解析。path 必须是 host 根下的绝对路径。
@@ -231,19 +241,20 @@ func (c *TencentCodeBuddyClient) fetchModelsAt(
 	account *Account,
 	cred TencentCodeBuddyCredential,
 	url string,
-) ([]string, int, error) {
+) ([]string, map[string]TencentCodeBuddyModelCapability, int, error) {
 	resp, err := c.do(ctx, account, cred, http.MethodGet, url, nil, false, nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, tencentCodeBuddyMaxModelsBody))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, resp.StatusCode, infraerrors.Newf(http.StatusBadGateway, "TENCENT_CODEBUDDY_MODELS_HTTP_ERROR",
+		return nil, nil, resp.StatusCode, infraerrors.Newf(http.StatusBadGateway, "TENCENT_CODEBUDDY_MODELS_HTTP_ERROR",
 			"fetch models failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return parseTencentCodeBuddyModelIDsForProduct(body, cred.Endpoint().Product), resp.StatusCode, nil
+	return parseTencentCodeBuddyModelIDsForProduct(body, cred.Endpoint().Product),
+		parseTencentCodeBuddyModelCapabilities(body), resp.StatusCode, nil
 }
 
 // RefreshToken 调用官方刷新接口换取新的 access_token。

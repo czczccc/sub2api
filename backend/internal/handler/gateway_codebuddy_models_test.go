@@ -30,7 +30,7 @@ func TestWriteCodeBuddyModelsListAdvertisesCapabilities(t *testing.T) {
 		return service.ModelCapabilityEntry{}, false
 	}
 
-	writeCodeBuddyModelsList(c, []string{"hy3", "glm-5.3"}, resolve)
+	writeCodeBuddyModelsList(c, []string{"hy3", "glm-5.3"}, resolve, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var body struct {
@@ -80,7 +80,7 @@ func TestWriteCodeBuddyModelsListWithoutResolver(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	writeCodeBuddyModelsList(c, []string{"auto"}, nil)
+	writeCodeBuddyModelsList(c, []string{"auto"}, nil, nil)
 
 	var body struct {
 		Data []struct {
@@ -91,4 +91,48 @@ func TestWriteCodeBuddyModelsListWithoutResolver(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	require.Len(t, body.Data, 1)
 	require.Equal(t, []string{"text", "image"}, body.Data[0].InputModalities)
+}
+
+// 上游参数逐字段生效，后台覆盖只压过它填了的字段；并输出 OpenRouter 兼容字段。
+func TestWriteCodeBuddyModelsListMergesUpstreamCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	noImages := false
+	upstream := map[string]service.TencentCodeBuddyModelCapability{
+		"glm-5.3": {ContextWindow: 1_000_000, MaxOutputTokens: 48_000, SupportsImages: &noImages, DisplayName: "GLM-5.3"},
+	}
+	resolve := func(modelID string) (service.ModelCapabilityEntry, bool) {
+		if modelID == "glm-5.3" {
+			return service.ModelCapabilityEntry{ModelID: modelID, ContextWindow: 200_000}, true
+		}
+		return service.ModelCapabilityEntry{}, false
+	}
+	writeCodeBuddyModelsList(c, []string{"glm-5.3"}, resolve, upstream)
+
+	var body struct {
+		Data []struct {
+			DisplayName     string   `json:"display_name"`
+			InputModalities []string `json:"input_modalities"`
+			ContextWindow   int64    `json:"context_window"`
+			MaxOutputTokens int64    `json:"max_output_tokens"`
+			ContextLength   int64    `json:"context_length"`
+			TopProvider     struct {
+				ContextLength       int64 `json:"context_length"`
+				MaxCompletionTokens int64 `json:"max_completion_tokens"`
+			} `json:"top_provider"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Data, 1)
+	item := body.Data[0]
+	require.Equal(t, "GLM-5.3", item.DisplayName)
+	require.Equal(t, []string{"text"}, item.InputModalities)
+	require.Equal(t, int64(200_000), item.ContextWindow, "后台覆盖优先")
+	require.Equal(t, int64(48_000), item.MaxOutputTokens, "覆盖未填的字段沿用上游值")
+	require.Equal(t, int64(200_000), item.ContextLength)
+	require.Equal(t, int64(200_000), item.TopProvider.ContextLength)
+	require.Equal(t, int64(48_000), item.TopProvider.MaxCompletionTokens)
 }

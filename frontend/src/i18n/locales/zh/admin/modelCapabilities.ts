@@ -4,7 +4,7 @@ export default {
     description:
       '手工声明模型的上下文窗口、输出上限与输入模态。用于上游不返回能力字段、公共注册表也匹配不到的平台（典型是腾讯 CodeBuddy）。',
     advertiseOnlyHint:
-      '这些声明只影响对外广告（/v1/models 与 Codex manifest），不改变实际转发行为；留空表示不声明，网关会沿用自身的兜底值。',
+      '这些声明用于对外广告（/v1/models 与 Codex manifest）；CodeBuddy 的最大输出 tokens 还会用于转发时把超限的 max_tokens 裁到上限。留空表示不声明，网关会沿用自身的兜底值。',
     empty: '还没有任何覆盖条目。',
     platform: '平台',
     allPlatforms: '全部平台',
@@ -19,6 +19,27 @@ export default {
     loadFailed: '加载模型能力配置失败：{message}',
     saveSuccess: '模型能力配置已保存',
     saveFailed: '保存模型能力配置失败：{message}',
+    codeBuddy: {
+      title: 'WorkBuddy / CodeBuddy 生效参数',
+      description:
+        '每个模型实际对外声明的参数。优先级：上面的手填覆盖 > 上游同步 > 内置参数表 > 默认。上游参数在同步模型、每日签到时自动刷新。',
+      syncedAt: '上游最近同步：{time}',
+      refresh: '从上游刷新',
+      refreshing: '刷新中…',
+      refreshDone: '已刷新 {refreshed} 个账号，失败 {failed} 个',
+      refreshFailed: '刷新失败：{message}',
+      empty: '还没有 WorkBuddy / CodeBuddy 账号。',
+      vision: '识图',
+      yes: '支持',
+      no: '不支持',
+      source: '来源',
+      sources: {
+        override: '后台覆盖',
+        upstream: '上游同步',
+        builtin: '内置参数表',
+        default: '默认',
+      },
+    },
     modalities: {
       text: '文本',
       image: '图片',

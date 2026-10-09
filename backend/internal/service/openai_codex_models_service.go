@@ -998,6 +998,18 @@ func buildCodexModelsManifestForAccounts(
 			compositeRoutesAvailable,
 		); ok {
 			modelMetadata[modelID] = metadata
+		} else if effectivePlatform == PlatformTencentCodeBuddy {
+			// CodeBuddy 不走通用 upstream_model_metadata 快照，而是用自己的能力快照 +
+			// 内置参数表（见 tencent_codebuddy_model_caps.go）。推理档位留给后面
+			// applyCodeBuddyCodexReasoningLevels 处理，这里只给上下文与输入模态。
+			if capability, _ := ResolveTencentCodeBuddyGroupModelCapability(accounts, modelID); !capability.IsEmpty() {
+				modelMetadata[modelID] = codexModelMetadataOverride{UpstreamModelMetadata: UpstreamModelMetadata{
+					ID:              modelID,
+					ContextWindow:   capability.ContextWindow,
+					MaxOutputTokens: capability.MaxOutputTokens,
+					InputModalities: capability.InputModalities(),
+				}}
+			}
 		}
 	}
 	return buildCodexModelsManifest(modelIDs, effectivePlatform, imageInputModels, searchToolModels, metadataModels, modelMetadata, resolveCapability)
@@ -1389,6 +1401,10 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 		canonical := xai.ResolveGrokTextResponsesModelID(upstreamModel)
 		return isGrokCodexImageInputModel(canonical)
 	case PlatformTencentCodeBuddy:
+		// 上游能力快照明确声明了该模型是否识图时以它为准。
+		if capability, source := account.TencentCodeBuddyModelCapability(upstreamModel); source == TencentCodeBuddyCapabilitySourceUpstream && capability.SupportsImages != nil {
+			return *capability.SupportsImages
+		}
 		// 实测（2026-09-12，15/15 模型）：腾讯上游接受 OpenAI 形状的
 		// messages[].content 图片部分，data URL 与公网 URL 两种形态都能识别；
 		// 对照组（同问题不带图）会给出错误答案，确认模型确实看到了图片。

@@ -1230,7 +1230,7 @@ func (s *AccountTestService) fetchTencentCodeBuddyUpstreamModels(ctx context.Con
 	}
 
 	client := NewTencentCodeBuddyClient(s.httpUpstream)
-	models, status, err := client.fetchModels(ctx, account)
+	models, capabilities, status, err := client.FetchModelCatalog(ctx, account)
 	if err != nil && cred.RefreshToken != "" && tencentCodeBuddyTokenExpiredStatus(status) {
 		refreshed, refreshErr := client.RefreshToken(ctx, account)
 		if refreshErr != nil {
@@ -1238,13 +1238,17 @@ func (s *AccountTestService) fetchTencentCodeBuddyUpstreamModels(ctx context.Con
 		}
 		retry := *account
 		retry.Credentials = refreshed.Apply(account.Credentials)
-		models, _, err = client.fetchModels(ctx, &retry)
+		models, capabilities, _, err = client.FetchModelCatalog(ctx, &retry)
 	}
 	if err != nil {
 		return nil, newUpstreamModelSyncErrorFromTencentCodeBuddy(err)
 	}
 	if len(models) == 0 {
 		return nil, newUpstreamModelSyncUpstreamError("Upstream returned no supported models", nil)
+	}
+	// 模型能力（上下文/输出上限/识图）单独存快照：失败只记日志，不影响 ID 同步结果。
+	if saveErr := saveTencentCodeBuddyModelCapabilities(ctx, s.accountRepo, account, capabilities); saveErr != nil {
+		slog.Warn("save codebuddy model capabilities failed", "account_id", account.ID, "error", saveErr)
 	}
 	return dedupeAndSortModelIDs(models), nil
 }

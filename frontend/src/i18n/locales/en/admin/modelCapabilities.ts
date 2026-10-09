@@ -4,7 +4,7 @@ export default {
     description:
       'Declare context window, output limit and input modalities by hand. Intended for upstreams that expose no capability metadata and match no public registry (typically Tencent CodeBuddy).',
     advertiseOnlyHint:
-      'These declarations only affect what the gateway advertises (/v1/models and the Codex manifest); they do not change request forwarding. Leaving a field empty means "not declared" and the gateway keeps its own fallback.',
+      'These declarations drive what the gateway advertises (/v1/models and the Codex manifest); for CodeBuddy the max output tokens also clamps oversized max_tokens when forwarding. Leaving a field empty means "not declared" and the gateway keeps its own fallback.',
     empty: 'No override entries yet.',
     platform: 'Platform',
     allPlatforms: 'All platforms',
@@ -19,6 +19,27 @@ export default {
     loadFailed: 'Failed to load model capabilities: {message}',
     saveSuccess: 'Model capability overrides saved',
     saveFailed: 'Failed to save model capability overrides: {message}',
+    codeBuddy: {
+      title: 'WorkBuddy / CodeBuddy effective capabilities',
+      description:
+        'What each model actually advertises. Priority: the overrides above > upstream sync > built-in table > default. Upstream values refresh on model sync and on the daily check-in.',
+      syncedAt: 'Last upstream sync: {time}',
+      refresh: 'Refresh from upstream',
+      refreshing: 'Refreshing…',
+      refreshDone: 'Refreshed {refreshed} account(s), {failed} failed',
+      refreshFailed: 'Refresh failed: {message}',
+      empty: 'No WorkBuddy / CodeBuddy accounts yet.',
+      vision: 'Vision',
+      yes: 'Yes',
+      no: 'No',
+      source: 'Source',
+      sources: {
+        override: 'Override',
+        upstream: 'Upstream',
+        builtin: 'Built-in table',
+        default: 'Default',
+      },
+    },
     modalities: {
       text: 'Text',
       image: 'Image',
