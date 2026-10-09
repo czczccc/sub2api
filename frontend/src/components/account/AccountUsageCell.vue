@@ -597,6 +597,11 @@
     <AccountQuotaInfo v-if="account.platform === 'gemini'" :account="account" />
     <!-- Key/Bedrock accounts: show today stats + optional quota bars -->
     <div v-else class="space-y-1">
+      <CodeBuddyCreditsCell
+        v-if="isCodeBuddyCreditsAccount"
+        :account="account"
+        @account-updated="emit('account-updated', $event)"
+      />
       <OllamaCloudUsageCell
         v-if="account.ollama_cloud_usage?.eligible"
         :account="account"
@@ -667,7 +672,7 @@
 
       <!-- No data at all -->
       <div
-        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
+        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !isCodeBuddyCreditsAccount && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
         class="text-xs text-gray-400"
       >-</div>
     </div>
@@ -689,10 +694,12 @@ import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
 import CNProviderQuotaCell from './CNProviderQuotaCell.vue'
 import CNProviderBalanceCell from './CNProviderBalanceCell.vue'
+import CodeBuddyCreditsCell from './CodeBuddyCreditsCell.vue'
 import OllamaCloudUsageCell from './OllamaCloudUsageCell.vue'
 import {
   cnQuotaCellVisible as cnQuotaCellVisibleFn,
   cnBalanceCellVisible as cnBalanceCellVisibleFn,
+  codeBuddyCreditsSupported,
   isMultiProtocolApiKeyPlatform
 } from './credentialsBuilder'
 import OpenCodeGoUsageCell from './OpenCodeGoUsageCell.vue'
@@ -788,6 +795,8 @@ const shouldFetchUsage = computed(() => {
 // credentialsBuilder 的单一实现）：都不可见时显示 `-` 占位符。
 const cnQuotaCellVisible = computed(() => cnQuotaCellVisibleFn(props.account))
 const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account))
+
+const isCodeBuddyCreditsAccount = computed(() => codeBuddyCreditsSupported(props.account))
 
 const isBatchManaged = computed(() => typeof props.requestBatchedUsage === 'function')
 

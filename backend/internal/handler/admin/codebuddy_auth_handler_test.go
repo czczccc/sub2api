@@ -80,7 +80,7 @@ func codeBuddyAuthMux(t *testing.T, statePath, tokenPath, accountPath string, pe
 func newCodeBuddyAuthHandler(t *testing.T, upstream http.HandlerFunc) *CodeBuddyAuthHandler {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	return NewCodeBuddyAuthHandler(service.NewTencentCodeBuddyProvider(newCodeBuddyAuthTestUpstream(t, upstream)))
+	return NewCodeBuddyAuthHandler(service.NewTencentCodeBuddyProvider(newCodeBuddyAuthTestUpstream(t, upstream)), nil)
 }
 
 // TestCodeBuddyAuthHandler_PollPendingIsSuccess 锁定「用户未登录」是正常中间态：
@@ -111,7 +111,7 @@ func TestCodeBuddyAuthHandler_StartAndPollRouteBySite(t *testing.T) {
 	upstream := newCodeBuddyAuthTestUpstream(t, codeBuddyAuthMux(t,
 		"/v2/plugin/auth/state", "/v2/plugin/auth/token", "/v2/plugin/login/account", false))
 	gin.SetMode(gin.TestMode)
-	h := NewCodeBuddyAuthHandler(service.NewTencentCodeBuddyProvider(upstream))
+	h := NewCodeBuddyAuthHandler(service.NewTencentCodeBuddyProvider(upstream), nil)
 
 	// 站点：WorkBuddy 国际版。
 	w := httptest.NewRecorder()
@@ -169,7 +169,7 @@ func TestCodeBuddyAuthHandler_UnknownSiteFallsBack(t *testing.T) {
 	upstream := newCodeBuddyAuthTestUpstream(t, codeBuddyAuthMux(t,
 		"/v2/plugin/auth/state", "/v2/plugin/auth/token", "/v2/plugin/login/account", false))
 	gin.SetMode(gin.TestMode)
-	h := NewCodeBuddyAuthHandler(service.NewTencentCodeBuddyProvider(upstream))
+	h := NewCodeBuddyAuthHandler(service.NewTencentCodeBuddyProvider(upstream), nil)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)

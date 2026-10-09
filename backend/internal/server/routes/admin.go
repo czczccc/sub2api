@@ -376,6 +376,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		// CodeBuddy 设备授权向导：生成授权链接 / 轮询取回凭据（不绑定账号）。
 		accounts.POST("/codebuddy/auth/state", h.Admin.CodeBuddyAuth.Start)
 		accounts.GET("/codebuddy/auth/poll", h.Admin.CodeBuddyAuth.Poll)
+		accounts.POST("/:id/codebuddy/credits/refresh", h.Admin.CodeBuddyAuth.RefreshCredits)
 		accounts.POST("/import/codex-session", h.Admin.Account.ImportCodexSession)
 		accounts.POST("/sync/crs", h.Admin.Account.SyncFromCRS)
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)

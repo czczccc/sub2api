@@ -148,11 +148,21 @@ func (r *checkinTestRepo) ListByPlatform(_ context.Context, _ string) ([]Account
 }
 
 func (r *checkinTestRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
-	r.updates[id] = updates
+	if r.updates[id] == nil {
+		r.updates[id] = map[string]any{}
+	}
+	for key, value := range updates {
+		r.updates[id][key] = value
+	}
 	return nil
 }
 
-type checkinTestClient struct{ calls int }
+type checkinTestClient struct{ calls, creditCalls int }
+
+func (c *checkinTestClient) QueryCredits(_ context.Context, _ *Account) (TencentCodeBuddyCredits, error) {
+	c.creditCalls++
+	return TencentCodeBuddyCredits{Remain: 80, Total: 100, Used: 20}, nil
+}
 
 func (c *checkinTestClient) Checkin(_ context.Context, _ *Account) (TencentCodeBuddyCheckinResult, error) {
 	c.calls++
@@ -181,5 +191,9 @@ func TestTencentCodeBuddyCheckinService_RunOnceRecordsResult(t *testing.T) {
 	require.Equal(t, "2026-10-09", saved[tencentCodeBuddyExtraCheckinDate])
 	require.Equal(t, TencentCodeBuddyCheckinClaimed, saved[tencentCodeBuddyExtraCheckinResult])
 	require.Equal(t, float64(2), saved[tencentCodeBuddyExtraCheckinStreak])
-	require.NotContains(t, repo.updates, optedOut.ID)
+	require.Equal(t, float64(80), saved[tencentCodeBuddyExtraCreditsRemain])
+	// 关闭自动签到的账号不签到，但积分照常刷新。
+	require.NotContains(t, repo.updates[optedOut.ID], tencentCodeBuddyExtraCheckinResult)
+	require.Equal(t, float64(80), repo.updates[optedOut.ID][tencentCodeBuddyExtraCreditsRemain])
+	require.Equal(t, 2, client.creditCalls)
 }

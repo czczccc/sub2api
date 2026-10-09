@@ -422,6 +422,18 @@ export function isCodeBuddyPlatform(platform: string): boolean {
   return platform === 'codebuddy'
 }
 
+/**
+ * 账号是否支持剩余积分查询：仅大陆站（region 缺省按大陆处理，与后端归一化一致）。
+ */
+export function codeBuddyCreditsSupported(account: {
+  platform: string
+  credentials?: Record<string, unknown> | null
+}): boolean {
+  if (!isCodeBuddyPlatform(account.platform)) return false
+  const region = account.credentials?.region
+  return typeof region !== 'string' || region.trim() === '' || region.trim().toLowerCase() === 'china'
+}
+
 export interface CodeBuddyCredentialInput {
   accessToken: string
   refreshToken?: string

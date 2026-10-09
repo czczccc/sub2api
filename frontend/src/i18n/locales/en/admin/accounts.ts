@@ -176,6 +176,15 @@ export default {
         autoCheckin: 'Daily auto check-in',
         autoCheckinHint: "Claims the daily check-in credits with this account's stored token (never claims twice a day).",
         lastCheckin: 'Last check-in',
+        credits: {
+          label: 'Credits',
+          remain: '{remain} / {total} left',
+          empty: 'Not queried',
+          refresh: 'Refresh',
+          refreshTooltip: 'Query remaining credits from WorkBuddy (also refreshed by every check-in run)',
+          expireAt: 'expires {date}',
+          checkedAt: 'Checked at'
+        },
         checkinResults: {
           claimed: 'Claimed',
           already: 'Already checked in',

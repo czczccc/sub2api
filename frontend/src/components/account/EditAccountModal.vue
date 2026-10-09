@@ -162,6 +162,20 @@
                 · {{ account.extra.codebuddy_checkin_message }}
               </template>
             </p>
+            <p v-if="account?.extra?.codebuddy_credits_checked_at" class="input-hint">
+              {{ t('admin.accounts.codebuddy.credits.label') }}:
+              <template v-if="typeof account.extra.codebuddy_credits_remain === 'number'">
+                {{ t('admin.accounts.codebuddy.credits.remain', {
+                  remain: account.extra.codebuddy_credits_remain,
+                  total: account.extra.codebuddy_credits_total ?? account.extra.codebuddy_credits_remain
+                }) }}
+              </template>
+              · {{ t('admin.accounts.codebuddy.credits.checkedAt') }}
+              {{ formatDateTime(new Date(String(account.extra.codebuddy_credits_checked_at))) }}
+              <template v-if="account.extra.codebuddy_credits_error">
+                · {{ account.extra.codebuddy_credits_error }}
+              </template>
+            </p>
           </div>
         </template>
 

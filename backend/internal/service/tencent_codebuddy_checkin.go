@@ -277,6 +277,7 @@ var tencentCodeBuddyCheckinLocation = time.FixedZone("CST", 8*3600)
 // tencentCodeBuddyCheckinner 抽象签到调用（*TencentCodeBuddyClient 实现，测试可替换）。
 type tencentCodeBuddyCheckinner interface {
 	Checkin(ctx context.Context, account *Account) (TencentCodeBuddyCheckinResult, error)
+	tencentCodeBuddyCreditsQuerier
 }
 
 // TencentCodeBuddyCheckinService 周期性为 CodeBuddy / WorkBuddy 账号领取每日签到积分。
@@ -284,7 +285,8 @@ type tencentCodeBuddyCheckinner interface {
 // 复用 CNProviderBalanceCheckService 的 Start/Stop/runOnce + ticker 骨架。每轮：
 //   - 跳过非 active、缺 access_token、extra.codebuddy_auto_checkin=false 的账号；
 //   - 今天（北京时间）已记录 claimed/already 的账号不再请求；
-//   - 其余账号先查状态、未签才领，结果写回 extra 供后台展示。
+//   - 其余账号先查状态、未签才领，结果写回 extra 供后台展示；
+//   - 签到之后为所有 active 的大陆站账号刷新一次剩余积分（不受自动签到开关影响）。
 //
 // 多实例部署时可能重复查询，但上游接口幂等，不会重复领取。
 type TencentCodeBuddyCheckinService struct {
@@ -373,6 +375,27 @@ func (s *TencentCodeBuddyCheckinService) runOnce() {
 	}
 	if claimed > 0 || failed > 0 {
 		log.Printf("[CodeBuddyCheckin] claimed=%d failed=%d", claimed, failed)
+	}
+	s.refreshCredits(accounts)
+}
+
+// refreshCredits 为 active 且支持积分查询的账号刷新剩余积分；失败只记日志，结果写入 extra。
+func (s *TencentCodeBuddyCheckinService) refreshCredits(accounts []Account) {
+	failed := 0
+	for i := range accounts {
+		account := &accounts[i]
+		if !account.IsActive() || !account.TencentCodeBuddyCredential().HasAccessToken() || !tencentCodeBuddyCreditsSupported(account) {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		if _, err := refreshTencentCodeBuddyCredits(ctx, s.accountRepo, s.client, account); err != nil {
+			failed++
+			log.Printf("[CodeBuddyCheckin] refresh credits for account %d: %v", account.ID, err)
+		}
+		cancel()
+	}
+	if failed > 0 {
+		log.Printf("[CodeBuddyCheckin] credits refresh failed=%d", failed)
 	}
 }
 

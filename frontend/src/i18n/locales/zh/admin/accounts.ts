@@ -379,6 +379,15 @@ export default {
         autoCheckin: '每日自动签到',
         autoCheckinHint: '用该账号已存的令牌每天领取签到积分（已签过不会重复领取）。',
         lastCheckin: '上次签到',
+        credits: {
+          label: '积分',
+          remain: '剩余 {remain} / {total}',
+          empty: '未查询',
+          refresh: '刷新',
+          refreshTooltip: '从 WorkBuddy 查询剩余积分（签到任务每轮也会自动刷新）',
+          expireAt: '{date} 到期',
+          checkedAt: '查询于'
+        },
         checkinResults: {
           claimed: '领取成功',
           already: '今日已签',
