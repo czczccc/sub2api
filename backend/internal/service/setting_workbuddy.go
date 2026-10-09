@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,6 +31,73 @@ type WorkBuddyConfig struct {
 	PromptMode string `json:"prompt_mode"`
 	// PromptText 是 append / custom 模式使用的网关提示词；为空时用内置默认提示词。
 	PromptText string `json:"prompt_text"`
+
+	// 日常保号任务（北京时间整点执行；Hours 为空时取默认时点）。
+	ActivityTask WorkBuddyTaskSchedule `json:"activity_task"`
+	StreakTask   WorkBuddyTaskSchedule `json:"streak_task"`
+	TravelTask   WorkBuddyTaskSchedule `json:"travel_task"`
+	NicknameTask WorkBuddyTaskSchedule `json:"nickname_task"`
+	// 余额定时刷新：积分恢复后自动解除"积分耗尽"暂停。
+	BalanceRefreshDisabled bool `json:"balance_refresh_disabled"`
+	BalanceRefreshMinutes  int  `json:"balance_refresh_minutes"`
+}
+
+// WorkBuddyTaskSchedule 是单个日常任务的开关与执行时点。
+type WorkBuddyTaskSchedule struct {
+	Disabled bool  `json:"disabled"`
+	Hours    []int `json:"hours"`
+}
+
+// 日常任务名，也是手动执行接口的路径参数。
+const (
+	WorkBuddyTaskActivity = "activity"
+	WorkBuddyTaskStreak   = "streak"
+	WorkBuddyTaskTravel   = "travel"
+	WorkBuddyTaskNickname = "nickname"
+	WorkBuddyTaskBalance  = "balance"
+)
+
+// workBuddyDefaultTaskHours 是各任务的默认执行时点（北京时间），与参考实现一致。
+var workBuddyDefaultTaskHours = map[string][]int{
+	WorkBuddyTaskActivity: {10},
+	WorkBuddyTaskStreak:   {9, 21},
+	WorkBuddyTaskTravel:   {9, 21},
+	WorkBuddyTaskNickname: {8},
+}
+
+const workBuddyDefaultBalanceRefreshMinutes = 5
+
+func normalizeWorkBuddyTaskSchedule(schedule WorkBuddyTaskSchedule, task string) WorkBuddyTaskSchedule {
+	seen := map[int]bool{}
+	hours := make([]int, 0, len(schedule.Hours))
+	for _, h := range schedule.Hours {
+		if h < 0 || h > 23 || seen[h] {
+			continue
+		}
+		seen[h] = true
+		hours = append(hours, h)
+	}
+	if len(hours) == 0 {
+		hours = append(hours, workBuddyDefaultTaskHours[task]...)
+	}
+	sort.Ints(hours)
+	schedule.Hours = hours
+	return schedule
+}
+
+// TaskSchedule 返回任务的调度配置；未知任务返回禁用。
+func (cfg WorkBuddyConfig) TaskSchedule(task string) WorkBuddyTaskSchedule {
+	switch task {
+	case WorkBuddyTaskActivity:
+		return cfg.ActivityTask
+	case WorkBuddyTaskStreak:
+		return cfg.StreakTask
+	case WorkBuddyTaskTravel:
+		return cfg.TravelTask
+	case WorkBuddyTaskNickname:
+		return cfg.NicknameTask
+	}
+	return WorkBuddyTaskSchedule{Disabled: true}
 }
 
 type cachedWorkBuddyConfig struct {
@@ -45,6 +113,13 @@ func normalizeWorkBuddyConfig(cfg WorkBuddyConfig) WorkBuddyConfig {
 		cfg.PromptMode = WorkBuddyPromptModeDegrade
 	}
 	cfg.PromptText = strings.TrimSpace(cfg.PromptText)
+	cfg.ActivityTask = normalizeWorkBuddyTaskSchedule(cfg.ActivityTask, WorkBuddyTaskActivity)
+	cfg.StreakTask = normalizeWorkBuddyTaskSchedule(cfg.StreakTask, WorkBuddyTaskStreak)
+	cfg.TravelTask = normalizeWorkBuddyTaskSchedule(cfg.TravelTask, WorkBuddyTaskTravel)
+	cfg.NicknameTask = normalizeWorkBuddyTaskSchedule(cfg.NicknameTask, WorkBuddyTaskNickname)
+	if cfg.BalanceRefreshMinutes <= 0 {
+		cfg.BalanceRefreshMinutes = workBuddyDefaultBalanceRefreshMinutes
+	}
 	return cfg
 }
 

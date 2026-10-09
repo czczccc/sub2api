@@ -37,6 +37,27 @@
         {{ t('admin.accounts.codebuddy.credits.refresh') }}
       </button>
     </div>
+    <div
+      v-if="nickname"
+      data-test="codebuddy-nickname"
+      class="max-w-[220px] truncate text-[10px] leading-4 text-gray-500 dark:text-gray-400"
+      :title="nickname"
+    >
+      {{ nickname }}
+    </div>
+    <div v-if="taskResults.length" class="flex flex-wrap gap-1" data-test="codebuddy-task-results">
+      <span
+        v-for="item in taskResults"
+        :key="item.task"
+        class="rounded px-1 text-[10px] leading-4"
+        :class="item.ok
+          ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+          : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300'"
+        :title="item.title"
+      >
+        {{ item.label }}{{ item.ok ? ' ✓' : ' ✗' }}
+      </span>
+    </div>
     <div v-if="expireLabel" class="text-[10px] leading-4 text-amber-600 dark:text-amber-400">
       {{ expireLabel }}
     </div>
@@ -96,6 +117,25 @@ const checkedAtTitle = computed(() => {
   const value = stringField('codebuddy_credits_checked_at')
   return value ? `${t('admin.accounts.codebuddy.credits.checkedAt')} ${formatDateTime(new Date(value))}` : ''
 })
+
+const nickname = computed(() => stringField('codebuddy_nickname'))
+
+const DAILY_TASKS = ['activity', 'streak', 'travel', 'nickname'] as const
+const taskResults = computed(() =>
+  DAILY_TASKS.flatMap((task) => {
+    const raw = extra.value[`codebuddy_task_${task}`]
+    if (!raw || typeof raw !== 'object') return []
+    const result = raw as { at?: unknown; ok?: unknown; message?: unknown }
+    const at = typeof result.at === 'string' && result.at ? formatDateTime(new Date(result.at)) : ''
+    const message = typeof result.message === 'string' ? result.message : ''
+    return [{
+      task,
+      ok: result.ok === true,
+      label: t(`admin.workbuddySettings.tasks.names.${task}`),
+      title: [at, message].filter(Boolean).join(' · ')
+    }]
+  })
+)
 
 const errorText = computed(() => requestError.value || stringField('codebuddy_credits_error'))
 

@@ -151,3 +151,13 @@ func (h *CodeBuddyAuthHandler) Poll(c *gin.Context) {
 		"nickname":    result.Nickname,
 	})
 }
+
+// RunDailyTask 立即在后台执行一次日常保号任务（activity/streak/travel/nickname/balance）。
+func (h *CodeBuddyAuthHandler) RunDailyTask(c *gin.Context) {
+	task := c.Param("task")
+	if err := h.provider.DailyTasks().RunInBackground(task); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"task": task, "started": true})
+}

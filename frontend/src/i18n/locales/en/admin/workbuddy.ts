@@ -28,6 +28,31 @@ export default {
       text: 'Gateway prompt',
       textHint: 'Leave empty to use the built-in default prompt.',
       useDefault: 'Fill in the built-in default'
+    },
+    tasks: {
+      title: 'Daily keep-alive tasks',
+      description: 'Applies to mainland China personal accounts only, runs on the hour (Beijing time); the latest result per account shows in the account list.',
+      enabled: 'Enabled',
+      hours: 'Hours',
+      hoursHint: 'Hours 0–23, comma separated',
+      runNow: 'Run now',
+      runStarted: 'Started in the background; check the account list for results',
+      runFailed: 'Run failed: {message}',
+      names: {
+        activity: 'Activity report',
+        streak: 'Streak manager',
+        travel: 'Cat travel',
+        nickname: 'Nickname sync',
+        balance: 'Balance refresh'
+      },
+      hints: {
+        activity: 'Accounts that already chatted today report activity directly; others send one real short chat first, then report.',
+        streak: "Uses a makeup card for a missed yesterday, claims newbie gift and compensation, redeems unlocked streak tiers, and uses all lottery draws.",
+        travel: 'Adopts a cat when there is none (after a chat that day), claims rewards on return, and sends the cat travelling when idle.',
+        nickname: 'Reads the account nickname from the website and shows it in the account list.',
+        balance: 'Refreshes remaining credits periodically; lifts the credits-exhausted pause once credits are back.'
+      },
+      balanceMinutes: 'Interval (minutes)'
     }
   }
 }

@@ -499,6 +499,22 @@ func credentialString(credentials map[string]any, key string) string {
 // TokenRefreshService 与网关暴露稳定入口。
 type TencentCodeBuddyProvider struct {
 	client *TencentCodeBuddyClient
+	tasks  *TencentCodeBuddyDailyTaskService
+}
+
+// SetDailyTasks 挂上日常保号任务服务，供管理端“立即执行”复用。
+func (p *TencentCodeBuddyProvider) SetDailyTasks(tasks *TencentCodeBuddyDailyTaskService) {
+	if p != nil {
+		p.tasks = tasks
+	}
+}
+
+// DailyTasks 返回日常保号任务服务，未启用时为 nil。
+func (p *TencentCodeBuddyProvider) DailyTasks() *TencentCodeBuddyDailyTaskService {
+	if p == nil {
+		return nil
+	}
+	return p.tasks
 }
 
 // NewTencentCodeBuddyProvider 构造 Provider。

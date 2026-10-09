@@ -298,6 +298,7 @@ type TencentCodeBuddyCheckinService struct {
 	stopCh      chan struct{}
 	stopOnce    sync.Once
 	wg          sync.WaitGroup
+	tasks       *TencentCodeBuddyDailyTaskService
 }
 
 // NewTencentCodeBuddyCheckinService 构造签到服务。interval <= 0 时 Start() 不启动。
@@ -352,6 +353,7 @@ func (s *TencentCodeBuddyCheckinService) Stop() {
 		close(s.stopCh)
 	})
 	s.wg.Wait()
+	s.tasks.Stop()
 }
 
 func (s *TencentCodeBuddyCheckinService) runOnce() {
@@ -478,6 +480,7 @@ func (s *TencentCodeBuddyCheckinService) checkinOne(account *Account, today stri
 func ProvideTencentCodeBuddyCheckinService(
 	accountRepo AccountRepository,
 	provider *TencentCodeBuddyProvider,
+	settingService *SettingService,
 	cfg *config.Config,
 ) *TencentCodeBuddyCheckinService {
 	minutes := 180
@@ -488,5 +491,9 @@ func ProvideTencentCodeBuddyCheckinService(
 	if cfg == nil || cfg.Gateway.CodeBuddy.AutoCheckinEnabled {
 		svc.Start()
 	}
+	// 日常保号任务各自按 WorkBuddy 设置里的开关与时段执行，和签到开关无关。
+	svc.tasks = NewTencentCodeBuddyDailyTaskService(accountRepo, provider.Client(), settingService)
+	provider.SetDailyTasks(svc.tasks)
+	svc.tasks.Start()
 	return svc
 }
