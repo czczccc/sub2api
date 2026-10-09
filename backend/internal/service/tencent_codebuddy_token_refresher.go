@@ -34,11 +34,16 @@ func (r *TencentCodeBuddyTokenRefresher) CanRefresh(account *Account) bool {
 	return account != nil && account.IsTencentCodeBuddy()
 }
 
-// NeedsRefresh 基于 expires_at 判断是否在刷新窗口内。
+// NeedsRefresh 判断是否该刷新令牌。
 // 读取走强类型凭据（ParseTencentCodeBuddyCredential），与写入路径共用同一份键契约；
-// expires_at 缺失时不刷新（与既有无过期信息不主动续期的策略一致）。
+// 过期时间优先取 expires_at，缺失时取 JWT exp；令牌签发满一天也会刷新（保活）。
 func (r *TencentCodeBuddyTokenRefresher) NeedsRefresh(account *Account, refreshWindow time.Duration) bool {
-	return account.TencentCodeBuddyCredential().NeedsRefresh(time.Now(), refreshWindow)
+	now := time.Now()
+	// 转发时遇到 401 会暂停账号并标记原因，此时不论令牌看起来是否过期都要刷新。
+	if tencentCodeBuddyNeedsForcedRefresh(account, now) {
+		return true
+	}
+	return account.TencentCodeBuddyCredential().NeedsRefresh(now, refreshWindow)
 }
 
 // Refresh 调用官方刷新接口，返回更新后的 credentials（保留原有字段）。

@@ -148,6 +148,9 @@ type SettingService struct {
 	// /v1/models 与 Codex manifest 都会读它，同样不能在热路径上直连 DB。
 	modelCapabilityCache atomic.Value
 	modelCapabilitySF    singleflight.Group
+	// workBuddyConfigCache WorkBuddy 网关行为配置进程内缓存（*cachedWorkBuddyConfig）。
+	workBuddyConfigCache atomic.Value
+	workBuddyConfigSF    singleflight.Group
 
 	// openAIQuotaAutoPauseSettingsCache holds the most recently observed quota auto-pause
 	// settings. GetOpenAIQuotaAutoPauseSettings reads this atomic.Value on the request hot

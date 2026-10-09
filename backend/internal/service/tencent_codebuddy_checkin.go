@@ -31,8 +31,8 @@ import (
 const (
 	tencentCodeBuddyCheckinStatusPath = "/v2/billing/meter/checkin-activity-status"
 	tencentCodeBuddyCheckinClaimPath  = "/v2/billing/meter/daily-checkin"
-	// 桌面端签到请求的 UA；签到接口沿用客户端自身的 UA，避免风控差异。
-	tencentCodeBuddyCheckinUserAgent = "WorkBuddy"
+	// 签到、积分等 billing 接口沿用官方桌面端的单段 UA，避免风控差异。
+	tencentCodeBuddyCheckinUserAgent = tencentCodeBuddyBillingUserAgent
 	tencentCodeBuddyMaxCheckinBytes  = 64 * 1024
 	// 上游"今日已签"的业务码。
 	tencentCodeBuddyCheckinAlreadyCode = 10001
@@ -298,6 +298,7 @@ type TencentCodeBuddyCheckinService struct {
 	stopCh      chan struct{}
 	stopOnce    sync.Once
 	wg          sync.WaitGroup
+	tasks       *TencentCodeBuddyDailyTaskService
 }
 
 // NewTencentCodeBuddyCheckinService 构造签到服务。interval <= 0 时 Start() 不启动。
@@ -352,6 +353,7 @@ func (s *TencentCodeBuddyCheckinService) Stop() {
 		close(s.stopCh)
 	})
 	s.wg.Wait()
+	s.tasks.Stop()
 }
 
 func (s *TencentCodeBuddyCheckinService) runOnce() {
@@ -478,6 +480,7 @@ func (s *TencentCodeBuddyCheckinService) checkinOne(account *Account, today stri
 func ProvideTencentCodeBuddyCheckinService(
 	accountRepo AccountRepository,
 	provider *TencentCodeBuddyProvider,
+	settingService *SettingService,
 	cfg *config.Config,
 ) *TencentCodeBuddyCheckinService {
 	minutes := 180
@@ -488,5 +491,9 @@ func ProvideTencentCodeBuddyCheckinService(
 	if cfg == nil || cfg.Gateway.CodeBuddy.AutoCheckinEnabled {
 		svc.Start()
 	}
+	// 日常保号任务各自按 WorkBuddy 设置里的开关与时段执行，和签到开关无关。
+	svc.tasks = NewTencentCodeBuddyDailyTaskService(accountRepo, provider.Client(), settingService)
+	provider.SetDailyTasks(svc.tasks)
+	svc.tasks.Start()
 	return svc
 }

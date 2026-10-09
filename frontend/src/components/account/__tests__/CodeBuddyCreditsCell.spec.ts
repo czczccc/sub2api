@@ -86,4 +86,33 @@ describe('CodeBuddyCreditsCell', () => {
     })
     expect(wrapper.get('[data-test="codebuddy-credits-error"]').text()).toBe('积分接口返回异常')
   })
+
+  it('shows task results and the task center entry for personal WorkBuddy accounts', () => {
+    const wrapper = mount(CodeBuddyCreditsCell, {
+      props: {
+        account: makeAccount({
+          extra: {
+            codebuddy_nickname: '小明',
+            codebuddy_task_streak: { at: '2026-10-09T01:00:00Z', ok: true, message: '连登 8 天' },
+            codebuddy_task_travel: { at: '2026-10-09T01:00:00Z', ok: false, message: '派出失败' }
+          }
+        })
+      },
+      global: { stubs: { CodeBuddyTaskCenterModal: true } }
+    })
+    expect(wrapper.get('[data-test="codebuddy-nickname"]').text()).toBe('小明')
+    const results = wrapper.get('[data-test="codebuddy-task-results"]').text()
+    expect(results).toContain('admin.workbuddySettings.tasks.names.streak ✓')
+    expect(results).toContain('admin.workbuddySettings.tasks.names.travel ✗')
+    expect(wrapper.find('[data-test="codebuddy-task-center-open"]').exists()).toBe(true)
+  })
+
+  it('hides the task center for enterprise accounts', () => {
+    const wrapper = mount(CodeBuddyCreditsCell, {
+      props: {
+        account: makeAccount({ credentials: { product: 'workbuddy', region: 'china', enterprise_id: 'e-1' } })
+      }
+    })
+    expect(wrapper.find('[data-test="codebuddy-task-center-open"]').exists()).toBe(false)
+  })
 })

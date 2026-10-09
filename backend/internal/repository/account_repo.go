@@ -1320,13 +1320,17 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		query += `
 			AND status = 'active'`
 	}
+	typeCond := `type = 'oauth'`
 	if options.IncludeSetupToken {
-		query += `
-			AND type IN ('oauth', 'setup-token')`
-	} else {
-		query += `
-			AND type = 'oauth'`
+		typeCond = `type IN ('oauth', 'setup-token')`
 	}
+	args := []any{pq.Array(options.Platforms), options.AfterID, options.Limit}
+	if len(options.APIKeyPlatforms) > 0 {
+		args = append(args, pq.Array(options.APIKeyPlatforms))
+		typeCond = `(` + typeCond + ` OR (type = 'apikey' AND platform = ANY($4)))`
+	}
+	query += `
+			AND ` + typeCond
 	if options.RequireRefreshToken {
 		query += `
 			AND credentials ? 'refresh_token'
@@ -1343,7 +1347,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		ORDER BY id ASC
 		LIMIT $3`
 
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(options.Platforms), options.AfterID, options.Limit)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

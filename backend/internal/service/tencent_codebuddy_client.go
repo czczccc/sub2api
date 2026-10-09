@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -57,21 +59,76 @@ func (c *TencentCodeBuddyClient) requireAccount(account *Account) error {
 
 // ===== Header 构造（全模块唯一实现） =====
 
+// tencentCodeBuddyUserAgentFor 返回官方桌面端形状的出站 UA，国际版换 `WorkBuddy AI` 平台段。
+func tencentCodeBuddyUserAgentFor(cred TencentCodeBuddyCredential) string {
+	platform := "WorkBuddy"
+	if NormalizeTencentCodeBuddyRegion(cred.Region) == TencentCodeBuddyRegionGlobal {
+		platform = "WorkBuddy AI"
+	}
+	return "WorkBuddy/" + tencentWorkBuddyClientVersion + " " + platform + "/" + tencentWorkBuddyClientVersion +
+		" CLI/" + tencentWorkBuddyCLIVersion
+}
+
+// tencentCodeBuddyBillingUserAgent 是签到、积分等 billing 类接口的 UA：
+// 官方桌面端在这类请求上只带单段 `WorkBuddy/<版本>`。
+const tencentCodeBuddyBillingUserAgent = "WorkBuddy/" + tencentWorkBuddyClientVersion
+
+// tencentCodeBuddyStableID 按 uid + 用途稳定派生 36 位 hex 标识：跨重启不变、账号间互异，
+// 相当于"每个账号固定一台虚拟设备"，避免多个账号共用或缺失设备指纹被上游关联。
+// 盐与 workbuddy2api 一致，同一账号在两边部署得到同一个设备标识。
+func tencentCodeBuddyStableID(uid, purpose string) string {
+	sum := sha256.Sum256([]byte("wb2a:" + purpose + ":" + uid))
+	return hex.EncodeToString(sum[:18])
+}
+
 // ApplyIdentityHeaders 写入产品身份头。Authorization 不含在内：转发用
 // access_token、刷新还要带 X-Refresh-Token，两者的语义不同，由调用方显式选择。
 func (c *TencentCodeBuddyClient) ApplyIdentityHeaders(h http.Header, cred TencentCodeBuddyCredential) {
 	if h == nil {
 		return
 	}
-	h.Set("User-Agent", tencentCodeBuddyUserAgent)
-	h.Set("X-Domain", cred.Endpoint().Domain)
+	h.Set("User-Agent", tencentCodeBuddyUserAgentFor(cred))
+	// 官方客户端所有 API 请求都带的风控闸门头。
+	h.Set("X-CodeBuddy-Request", "1")
+	if NormalizeTencentCodeBuddyRegion(cred.Region) == TencentCodeBuddyRegionGlobal {
+		h.Set("Accept-Language", "en-US")
+	} else {
+		h.Set("Accept-Language", "zh-CN")
+	}
+	if cred.UserID != "" {
+		h.Set("X-Machine-ID", tencentCodeBuddyStableID(cred.UserID, "machine"))
+		h.Set("X-Session-ID", tencentCodeBuddyStableID(cred.UserID, "session"))
+	}
 	if cred.UserID != "" {
 		h.Set("X-User-Id", cred.UserID)
 	}
+	if isTencentWorkBuddyGlobal(cred) {
+		// 国际版对齐官方国际客户端：同域 Origin/Referer，固定声明国际版域与"无企业"，
+		// 不沿用登录返回的 domain / enterprise_id（参考实现 injectGlobalChatHeaders）。
+		h.Set("Origin", tencentWorkBuddyAPIHostIntl)
+		h.Set("Referer", tencentWorkBuddyAPIHostIntl+"/")
+		h.Set("X-Domain", tencentWorkBuddyDomainIntl)
+		h.Set("X-No-Enterprise-Id", "1")
+		return
+	}
+	h.Set("X-Domain", cred.Endpoint().Domain)
 	if cred.EnterpriseID != "" {
 		h.Set("X-Enterprise-Id", cred.EnterpriseID)
 		h.Set("X-Tenant-Id", cred.EnterpriseID)
 	}
+}
+
+// ApplyChatAttributionHeaders 写入对话请求的用量归属头，对齐官方 WorkBuddy 桌面端，
+// 避免上游用量记录里出现 client / agentPurpose 为空的网关特征。只用于 chat/completions。
+func (c *TencentCodeBuddyClient) ApplyChatAttributionHeaders(h http.Header) {
+	if h == nil {
+		return
+	}
+	h.Set("X-Agent-Purpose", "conversation")
+	h.Set("X-IDE-Name", "WorkBuddy")
+	h.Set("X-IDE-Type", "WorkBuddy")
+	h.Set("X-IDE-Version", tencentWorkBuddyClientVersion)
+	h.Set("X-Product", "WorkBuddy")
 }
 
 // ApplyBearer 写入 Authorization: Bearer <access_token>。空令牌不写头，避免发出
@@ -177,7 +234,13 @@ func (c *TencentCodeBuddyClient) ChatCompletion(ctx context.Context, account *Ac
 			"credentials.access_token is required")
 	}
 	url := strings.TrimRight(cred.Endpoint().BaseURL, "/") + tencentCodeBuddyChatCompletionsPath
-	return c.do(ctx, account, cred, http.MethodPost, url, body, stream, nil)
+	attribution := http.Header{}
+	c.ApplyChatAttributionHeaders(attribution)
+	extra := make(map[string]string, len(attribution))
+	for key := range attribution {
+		extra[key] = attribution.Get(key)
+	}
+	return c.do(ctx, account, cred, http.MethodPost, url, body, stream, extra)
 }
 
 // FetchModels 调用官方模型目录接口 {base}/models，返回模型 ID 列表。
@@ -304,8 +367,14 @@ func (c *TencentCodeBuddyClient) RefreshToken(ctx context.Context, account *Acco
 		if msg == "" {
 			msg = "unknown error"
 		}
+		if parsed.Code == tencentCodeBuddySessionDeadCode {
+			// 会话已失效，refresh_token 再试也没用；错误文案带上标记，让刷新服务直接置错误。
+			return TencentCodeBuddyCredential{}, infraerrors.Newf(http.StatusBadGateway,
+				"TENCENT_CODEBUDDY_REFRESH_REJECTED", "refresh failed (%s, code %d): %s, re-login required",
+				tencentCodeBuddySessionDeadMarker, parsed.Code, msg)
+		}
 		return TencentCodeBuddyCredential{}, infraerrors.Newf(http.StatusBadGateway,
-			"TENCENT_CODEBUDDY_REFRESH_REJECTED", "refresh failed: %s", msg)
+			"TENCENT_CODEBUDDY_REFRESH_REJECTED", "refresh failed (code %d): %s", parsed.Code, msg)
 	}
 
 	updated := cred
@@ -319,11 +388,22 @@ func (c *TencentCodeBuddyClient) RefreshToken(ctx context.Context, account *Acco
 	if domain := strings.TrimSpace(credentialString(parsed.Data, "domain")); domain != "" {
 		updated.Domain = domain
 	}
+	issuedAt, jwtExpiresAt := tencentCodeBuddyJWTTimes(updated.AccessToken)
+	updated.IssuedAt = issuedAt
 	if expiresAt := tencentCodeBuddyExpiresAt(parsed.Data); expiresAt != nil {
 		updated.ExpiresAt = expiresAt
+	} else if jwtExpiresAt != nil {
+		// 响应没带过期时间时以新令牌自身的 exp 为准；沿用旧值会让账号每轮都被判定临期。
+		updated.ExpiresAt = jwtExpiresAt
 	}
 	return updated, nil
 }
+
+// tencentCodeBuddySessionDeadCode 是上游"登录会话已失效"的业务码，只能重新扫码。
+const tencentCodeBuddySessionDeadCode = 12153
+
+// tencentCodeBuddySessionDeadMarker 写进刷新错误文案，供刷新服务识别为不可重试。
+const tencentCodeBuddySessionDeadMarker = "codebuddy_session_dead"
 
 // tencentCodeBuddyRefreshResponse 对齐官方刷新接口的 {code, msg, data} 封套。
 type tencentCodeBuddyRefreshResponse struct {
@@ -414,7 +494,7 @@ func (c *TencentCodeBuddyClient) publicJSON(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", tencentCodeBuddyUserAgent)
+	req.Header.Set("User-Agent", tencentCodeBuddyUserAgentFor(TencentCodeBuddyCredential{}))
 	for key, value := range extra {
 		req.Header.Set(key, value)
 	}

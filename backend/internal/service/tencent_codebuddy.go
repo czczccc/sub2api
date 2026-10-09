@@ -94,8 +94,12 @@ const (
 	tencentCodeBuddyLoginAccountPath = "/plugin/login/account"
 	tencentCodeBuddyAuthPlatform     = "CLI"
 
-	// 沿用参考实现已验证可用的 UA，避免上游风控差异。
-	tencentCodeBuddyUserAgent = "codebuddy2openai/2.0"
+	// 出站 UA 对齐官方 WorkBuddy 桌面端（RestOperations 层形状
+	// `WorkBuddy/<客户端版本> <平台>/<客户端版本> CLI/<CLI 版本>`），版本取自
+	// workbuddy2api 逆向的桌面端 5.5.4 / 内置 CLI 2.137.1。官方客户端不做 UA 随机化。
+	// 国际版平台段是 `WorkBuddy AI`，送错可能触发 11140 request illegal。
+	tencentWorkBuddyClientVersion = "5.5.4"
+	tencentWorkBuddyCLIVersion    = "2.137.1"
 
 	tencentCodeBuddyDefaultModel    = "auto"
 	tencentCodeBuddyDefaultTimeout  = 15 * time.Second
@@ -389,7 +393,9 @@ func applyTencentCodeBuddyHeaders(h http.Header, account *Account) {
 	if h == nil || account == nil {
 		return
 	}
-	newTencentCodeBuddyHeaderBuilder().ApplyIdentityHeaders(h, account.TencentCodeBuddyCredential())
+	builder := newTencentCodeBuddyHeaderBuilder()
+	builder.ApplyIdentityHeaders(h, account.TencentCodeBuddyCredential())
+	builder.ApplyChatAttributionHeaders(h)
 }
 
 // NormalizeTencentCodeBuddyCredentials 校验并原地归一化凭据。
@@ -493,6 +499,22 @@ func credentialString(credentials map[string]any, key string) string {
 // TokenRefreshService 与网关暴露稳定入口。
 type TencentCodeBuddyProvider struct {
 	client *TencentCodeBuddyClient
+	tasks  *TencentCodeBuddyDailyTaskService
+}
+
+// SetDailyTasks 挂上日常保号任务服务，供管理端“立即执行”复用。
+func (p *TencentCodeBuddyProvider) SetDailyTasks(tasks *TencentCodeBuddyDailyTaskService) {
+	if p != nil {
+		p.tasks = tasks
+	}
+}
+
+// DailyTasks 返回日常保号任务服务，未启用时为 nil。
+func (p *TencentCodeBuddyProvider) DailyTasks() *TencentCodeBuddyDailyTaskService {
+	if p == nil {
+		return nil
+	}
+	return p.tasks
 }
 
 // NewTencentCodeBuddyProvider 构造 Provider。

@@ -1560,13 +1560,20 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 }
 
 func openAICacheReadTokensFromUsage(value gjson.Result) int {
+	// DeepSeek 风格的 prompt_cache_hit_tokens：WorkBuddy 等上游会同时给出
+	// prompt_tokens_details.cached_tokens=0 与真实的 prompt_cache_hit_tokens，
+	// 嵌套字段为 0 时不能据此判定未命中。
+	cacheHit := max(int(value.Get("prompt_cache_hit_tokens").Int()), 0)
 	for _, nested := range []gjson.Result{
 		value.Get("input_tokens_details.cached_tokens"),
 		value.Get("prompt_tokens_details.cached_tokens"),
 	} {
 		if nested.Exists() {
-			return max(int(nested.Int()), 0)
+			return max(max(int(nested.Int()), 0), cacheHit)
 		}
+	}
+	if cacheHit > 0 {
+		return cacheHit
 	}
 
 	return firstPositiveGJSONInt(

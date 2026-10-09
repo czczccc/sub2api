@@ -57,6 +57,7 @@ func ProvideAdminHandlers(
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
+	accountHandler.SetTencentCodeBuddyProvider(codeBuddyAuthHandler.Provider())
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,

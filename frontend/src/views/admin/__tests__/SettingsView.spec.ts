@@ -564,6 +564,7 @@ function mountView() {
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
         ModelCapabilitySettings: true,
+        WorkBuddySettings: true,
       },
     },
   });
@@ -1367,6 +1368,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
         ModelCapabilitySettings: true,
+        WorkBuddySettings: true,
         },
       },
     });
@@ -1714,6 +1716,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
         ModelCapabilitySettings: true,
+        WorkBuddySettings: true,
         },
       },
     });

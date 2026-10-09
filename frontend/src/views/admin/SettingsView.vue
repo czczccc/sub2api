@@ -8901,13 +8901,18 @@
           <ModelCapabilitySettings />
         </div>
 
+        <!-- Tab: WorkBuddy -->
+        <div v-show="activeTab === 'workbuddy'">
+          <WorkBuddySettings />
+        </div>
+
         <!-- Tab: Backup -->
         <div v-show="activeTab === 'backup'">
           <BackupSettings />
         </div>
 
         <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <div v-show="activeTab !== 'backup' && activeTab !== 'workbuddy'" class="flex justify-end">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -9037,6 +9042,7 @@ import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import ModelCapabilitySettings from "@/views/admin/settings/ModelCapabilitySettings.vue";
+import WorkBuddySettings from "@/views/admin/settings/WorkBuddySettings.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import RechargeBonusTierEditor from "@/components/admin/settings/RechargeBonusTierEditor.vue";
 import {
@@ -9106,6 +9112,7 @@ type SettingsTab =
   | "payment"
   | "email"
   | "modelCapabilities"
+  | "workbuddy"
   | "backup";
 const activeTab = ref<SettingsTab>("general");
 const settingsTabs = [
@@ -9118,6 +9125,7 @@ const settingsTabs = [
   { key: "payment" as SettingsTab, icon: "creditCard" as const },
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "modelCapabilities" as SettingsTab, icon: "server" as const },
+  { key: "workbuddy" as SettingsTab, icon: "bolt" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
 ];
 

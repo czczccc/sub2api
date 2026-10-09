@@ -185,10 +185,21 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	grokCacheIdentity string,
 ) (*http.Response, error) {
 	bufferWorkBuddyStream := false
+	originalBody, originalStream := body, stream
+	var codeBuddyPolicy tencentCodeBuddyContentPolicy
 	// TencentCodeBuddy：腾讯私有上游对请求体有额外约束，必须先归一化再发出。
 	// 放在这个函数里是因为四条 CC 回退路径最终都经过它。
 	if account.IsTencentCodeBuddy() {
+		// 该出口 IP 已被 WAF 拦截：不再拿账号去撞，直接换下一个账号（不同代理的账号仍可用）。
+		if tencentCodeBuddyWAFIP.Blocked(tencentCodeBuddyEgressKey(account), time.Now()) {
+			return nil, &UpstreamFailoverError{
+				StatusCode:   http.StatusServiceUnavailable,
+				ResponseBody: []byte(`{"error":{"message":"upstream WAF blocked the gateway egress IP; retry after the block window","type":"upstream_error"}}`),
+			}
+		}
+		codeBuddyPolicy = s.tencentCodeBuddyContentPolicy(ctx)
 		body = normalizeTencentCodeBuddyUpstreamPayload(body)
+		body = prepareTencentCodeBuddyChatPayload(body, account, tencentCodeBuddyConversationID(c), codeBuddyPolicy)
 		// 超过模型输出上限的 max_tokens 裁到上限，避免上游直接 400。
 		body = tencentCodeBuddyClampMaxOutputTokens(body, account, s.tencentCodeBuddyMaxOutputOverride(ctx, body))
 		// WorkBuddy 国际版的 chat/completions 端点拒绝 stream=false（HTTP 400，
@@ -272,6 +283,19 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+	}
+	if account.IsTencentCodeBuddy() && codeBuddyPolicy.CanDegrade() &&
+		(resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden) {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		if isTencentCodeBuddyContentBlocked(resp.StatusCode, errBody) {
+			// 透传的客户端 system 提示词被内容审核误拦：当天改用中性提示词，并立刻重试一次。
+			tencentCodeBuddyDegrade.Trigger(time.Now())
+			logger.L().Warn("codebuddy content blocked, degrading system prompt until midnight",
+				zap.Int64("account_id", account.ID), zap.Int("status", resp.StatusCode))
+			return s.sendCCUpstreamRequest(ctx, c, account, targetURL, originalBody, originalStream, bearerToken, userAgent, grokCacheIdentity)
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(errBody))
 	}
 	if bufferWorkBuddyStream && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
 		strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
@@ -426,15 +450,22 @@ func (s *OpenAIGatewayService) bufferWorkBuddyStreamResponse(c *gin.Context, res
 			toolIndices = append(toolIndices, toolIndex)
 		}
 		sort.Ints(toolIndices)
+		finishReason := buffered.finishReason
 		for _, toolIndex := range toolIndices {
 			tool := *buffered.toolCalls[toolIndex]
 			tool.Index = nil
+			// 流被截断（输出上限 / 连接中断）时工具参数只剩半截 JSON，交给客户端只会解析失败卡死会话；
+			// 丢掉这个调用，finish_reason=length 让客户端知道输出被截断。
+			if isTencentCodeBuddyTruncatedArguments(tool.Function.Arguments) {
+				finishReason = "length"
+				continue
+			}
 			message.ToolCalls = append(message.ToolCalls, tool)
 		}
 		aggregate.Choices = append(aggregate.Choices, apicompat.ChatChoice{
 			Index:        buffered.index,
 			Message:      message,
-			FinishReason: buffered.finishReason,
+			FinishReason: finishReason,
 		})
 	}
 	if aggregate.ID == "" {

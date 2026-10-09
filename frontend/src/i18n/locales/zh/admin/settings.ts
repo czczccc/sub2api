@@ -11,6 +11,7 @@ export default {
         gateway: '网关服务',
         email: '邮件设置',
         modelCapabilities: '模型能力',
+        workbuddy: 'WorkBuddy',
         backup: '数据备份',
         payment: '支付设置',
       },

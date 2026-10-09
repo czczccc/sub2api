@@ -37,6 +37,14 @@ func NewCodeBuddyAuthHandler(provider *service.TencentCodeBuddyProvider, account
 	return &CodeBuddyAuthHandler{provider: provider, accountRepo: accountRepo}
 }
 
+// Provider 返回底层 CodeBuddy provider，供账号通用操作（如手动刷新令牌）复用。
+func (h *CodeBuddyAuthHandler) Provider() *service.TencentCodeBuddyProvider {
+	if h == nil {
+		return nil
+	}
+	return h.provider
+}
+
 // RefreshCredits 查询账号剩余积分并写回 extra。
 //
 // 上游查询失败也会把错误写进 extra（codebuddy_credits_error），因此这里仍返回 200 +
@@ -137,9 +145,90 @@ func (h *CodeBuddyAuthHandler) Poll(c *gin.Context) {
 	if credential.Domain != "" {
 		credentials["domain"] = credential.Domain
 	}
-	response.Success(c, gin.H{
+	data := gin.H{
 		"status":      "ready",
 		"credentials": credentials,
 		"nickname":    result.Nickname,
-	})
+	}
+	// WorkBuddy 国际版新账号要先注册激活，否则对话报 14017 trial not activated。
+	// 激活失败不影响登录结果，只在返回里带上原因。
+	if credential.Product == service.TencentCodeBuddyProductWorkBuddy && credential.Region == service.TencentCodeBuddyRegionGlobal {
+		if message, err := h.provider.ActivateWorkBuddyGlobalCredential(c.Request.Context(), credential); err != nil {
+			data["activation_error"] = err.Error()
+		} else {
+			data["activation"] = message
+		}
+	}
+	response.Success(c, data)
+}
+
+// RunDailyTask 立即在后台执行一次日常保号任务（activity/streak/travel/nickname/balance）。
+func (h *CodeBuddyAuthHandler) RunDailyTask(c *gin.Context) {
+	task := c.Param("task")
+	if err := h.provider.DailyTasks().RunInBackground(task); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"task": task, "started": true})
+}
+
+// growthTaskAccountID 解析成长任务接口的账号 ID。
+func growthTaskAccountID(c *gin.Context) (int64, bool) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "Invalid account id")
+		return 0, false
+	}
+	return accountID, true
+}
+
+// ListGrowthTasks 返回账号的成长任务列表。
+//
+// GET /admin/accounts/:id/codebuddy/growth-tasks
+func (h *CodeBuddyAuthHandler) ListGrowthTasks(c *gin.Context) {
+	accountID, ok := growthTaskAccountID(c)
+	if !ok {
+		return
+	}
+	tasks, err := h.provider.DailyTasks().ListAccountGrowthTasks(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"tasks": tasks})
+}
+
+// RunGrowthTask 用真实对话完成任务，达标后自动领奖。
+//
+// POST /admin/accounts/:id/codebuddy/growth-tasks/:code/run
+func (h *CodeBuddyAuthHandler) RunGrowthTask(c *gin.Context) {
+	accountID, ok := growthTaskAccountID(c)
+	if !ok {
+		return
+	}
+	message, err := h.provider.DailyTasks().RunAccountGrowthTask(c.Request.Context(), accountID, c.Param("code"))
+	if err != nil {
+		if message != "" {
+			err = infraerrors.Newf(infraerrors.Code(err), "CODEBUDDY_TASK_FAILED", "%s：%v", message, err)
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": message})
+}
+
+// ClaimGrowthTask 领取任务奖励。
+//
+// POST /admin/accounts/:id/codebuddy/growth-tasks/:code/claim
+func (h *CodeBuddyAuthHandler) ClaimGrowthTask(c *gin.Context) {
+	accountID, ok := growthTaskAccountID(c)
+	if !ok {
+		return
+	}
+	message, err := h.provider.DailyTasks().ClaimAccountGrowthTask(c.Request.Context(), accountID, c.Param("code"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"message": message})
 }
