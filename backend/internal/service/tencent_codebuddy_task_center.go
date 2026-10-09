@@ -56,10 +56,6 @@ type TencentCodeBuddyGrowthTask struct {
 	AutoHint string `json:"auto_hint,omitempty"`
 }
 
-func (t TencentCodeBuddyGrowthTask) done() bool {
-	return t.Claimed || (t.Target > 0 && t.Current >= t.Target)
-}
-
 func (c *TencentCodeBuddyClient) ListGrowthTasks(ctx context.Context, account *Account) ([]TencentCodeBuddyGrowthTask, error) {
 	data, err := c.growthJSON(ctx, account, http.MethodGet, tencentCodeBuddyTasksListPath, nil)
 	if err != nil {
