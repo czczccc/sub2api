@@ -142,5 +142,6 @@ func TestBuildTencentCodeBuddyModelCapabilityReport(t *testing.T) {
 	}
 	require.Equal(t, TencentCodeBuddyCapabilitySourceUpstream, sources["hy3-x"])
 	require.Equal(t, TencentCodeBuddyCapabilitySourceBuiltin, sources["glm-5.3"])
-	require.Equal(t, TencentCodeBuddyCapabilitySourceDefault, sources["minimax-m3"])
+	// minimax-m3 只有内置的推理档位，没有参数，也算内置来源。
+	require.Equal(t, TencentCodeBuddyCapabilitySourceBuiltin, sources["minimax-m3"])
 }

@@ -189,6 +189,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 放在这个函数里是因为四条 CC 回退路径最终都经过它。
 	if account.IsTencentCodeBuddy() {
 		body = normalizeTencentCodeBuddyUpstreamPayload(body)
+		body = prepareTencentCodeBuddyChatPayload(body, account, tencentCodeBuddyConversationID(c))
 		// 超过模型输出上限的 max_tokens 裁到上限，避免上游直接 400。
 		body = tencentCodeBuddyClampMaxOutputTokens(body, account, s.tencentCodeBuddyMaxOutputOverride(ctx, body))
 		// WorkBuddy 国际版的 chat/completions 端点拒绝 stream=false（HTTP 400，
@@ -426,15 +427,22 @@ func (s *OpenAIGatewayService) bufferWorkBuddyStreamResponse(c *gin.Context, res
 			toolIndices = append(toolIndices, toolIndex)
 		}
 		sort.Ints(toolIndices)
+		finishReason := buffered.finishReason
 		for _, toolIndex := range toolIndices {
 			tool := *buffered.toolCalls[toolIndex]
 			tool.Index = nil
+			// 流被截断（输出上限 / 连接中断）时工具参数只剩半截 JSON，交给客户端只会解析失败卡死会话；
+			// 丢掉这个调用，finish_reason=length 让客户端知道输出被截断。
+			if isTencentCodeBuddyTruncatedArguments(tool.Function.Arguments) {
+				finishReason = "length"
+				continue
+			}
 			message.ToolCalls = append(message.ToolCalls, tool)
 		}
 		aggregate.Choices = append(aggregate.Choices, apicompat.ChatChoice{
 			Index:        buffered.index,
 			Message:      message,
-			FinishReason: buffered.finishReason,
+			FinishReason: finishReason,
 		})
 	}
 	if aggregate.ID == "" {

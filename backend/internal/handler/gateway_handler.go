@@ -1435,6 +1435,9 @@ type codeBuddyModelListItem struct {
 	// ContextLength 与 TopProvider 是同一组数值的 OpenRouter 写法。
 	ContextLength int64                      `json:"context_length,omitempty"`
 	TopProvider   *codeBuddyModelTopProvider `json:"top_provider,omitempty"`
+	// 推理档位：网关会把请求里模型不支持的 reasoning_effort 降到支持的档位。
+	ReasoningSupportedEfforts []string `json:"reasoning_supported_efforts,omitempty"`
+	ReasoningDefaultEffort    string   `json:"reasoning_default_effort,omitempty"`
 }
 
 // codeBuddyModelCreatedAt 与其它非 OpenAI 平台的占位时间保持一致。
@@ -1474,6 +1477,10 @@ func writeCodeBuddyModelsList(
 			item.MaxOutputTokens = capability.MaxOutputTokens
 			if name := strings.TrimSpace(capability.DisplayName); name != "" {
 				item.DisplayName = name
+			}
+			if len(capability.SupportedEfforts) > 0 {
+				item.ReasoningSupportedEfforts = append([]string(nil), capability.SupportedEfforts...)
+				item.ReasoningDefaultEffort = capability.DefaultEffort
 			}
 		}
 		if resolve != nil {

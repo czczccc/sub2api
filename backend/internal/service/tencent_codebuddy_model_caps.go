@@ -58,11 +58,16 @@ type TencentCodeBuddyModelCapability struct {
 	MaxOutputTokens int64  `json:"max_output_tokens,omitempty"`
 	SupportsImages  *bool  `json:"supports_images,omitempty"`
 	DisplayName     string `json:"display_name,omitempty"`
+	// SupportedEfforts 是模型接受的 reasoning_effort 档位（上游 reasoning.supportedEfforts）；
+	// 为空表示未知，网关不做档位降级。
+	SupportedEfforts []string `json:"supported_efforts,omitempty"`
+	// DefaultEffort 是模型声明的默认档位（reasoning.defaultEffort，老字段 reasoning.effort）。
+	DefaultEffort string `json:"default_effort,omitempty"`
 }
 
 // IsEmpty 报告是否没有任何能力字段。
 func (c TencentCodeBuddyModelCapability) IsEmpty() bool {
-	return c.ContextWindow <= 0 && c.MaxOutputTokens <= 0 && c.SupportsImages == nil
+	return c.ContextWindow <= 0 && c.MaxOutputTokens <= 0 && c.SupportsImages == nil && len(c.SupportedEfforts) == 0
 }
 
 // InputModalities 把识图标记转成输入模态；未知时返回 nil。
@@ -90,6 +95,11 @@ func (c TencentCodeBuddyModelCapability) mergeMissing(fallback TencentCodeBuddyM
 	}
 	if strings.TrimSpace(c.DisplayName) == "" {
 		c.DisplayName = fallback.DisplayName
+	}
+	// 档位与默认档同源：快照没有档位时整组取兜底，不跨源拼接。
+	if len(c.SupportedEfforts) == 0 && len(fallback.SupportedEfforts) > 0 {
+		c.SupportedEfforts = append([]string(nil), fallback.SupportedEfforts...)
+		c.DefaultEffort = fallback.DefaultEffort
 	}
 	return c
 }
@@ -134,6 +144,38 @@ func DefaultTencentCodeBuddyModelCapabilities() map[string]TencentCodeBuddyModel
 		"gemini-3.5-flash": {ContextWindow: 1_000_000, MaxOutputTokens: 65_536},
 		"kimi-k3":          {ContextWindow: 1_000_000, MaxOutputTokens: 32_000},
 	}
+}
+
+// tencentCodeBuddyBuiltinEfforts 是大陆站模型的推理档位兜底表，上游目录没有下发
+// reasoning.supportedEfforts 时使用。数值照抄参考实现 workbuddy2api-panel
+// internal/upstream/effort_catalog.go 的 cnEffortFallback（来自官方客户端内置表）。
+var tencentCodeBuddyBuiltinEfforts = map[string]TencentCodeBuddyModelCapability{
+	"deepseek-v4-flash":   {SupportedEfforts: []string{"low", "high", "max"}},
+	"deepseek-v4.1-flash": {SupportedEfforts: []string{"low", "high", "max"}, DefaultEffort: "high"},
+	"deepseek-v4-pro":     {SupportedEfforts: []string{"low", "high", "xhigh"}, DefaultEffort: "high"},
+	"hy4-preview":         {SupportedEfforts: []string{"high"}, DefaultEffort: "high"},
+	"hy4-preview-x":       {SupportedEfforts: []string{"high"}},
+	"hy3":                 {SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high"},
+	"hy3-x":               {SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high"},
+	"glm-5.3":             {SupportedEfforts: []string{"low", "high", "max"}, DefaultEffort: "high"},
+	"glm-5.3-flash":       {SupportedEfforts: []string{"low", "high", "max"}, DefaultEffort: "high"},
+	"glm-5.2":             {SupportedEfforts: []string{"high", "xhigh"}, DefaultEffort: "high"},
+	"glm-5.1":             {SupportedEfforts: []string{"medium"}},
+	"glm-5v-turbo":        {SupportedEfforts: []string{"medium"}},
+	"kimi-k3-1":           {SupportedEfforts: []string{"medium"}},
+	"kimi-k2.7":           {SupportedEfforts: []string{"medium"}},
+	"kimi-k2.6":           {SupportedEfforts: []string{"medium"}},
+	"minimax-m3":          {SupportedEfforts: []string{"medium"}},
+}
+
+// tencentCodeBuddyBuiltinCapability 返回内置表条目：参数表与档位表按字段合并。
+func tencentCodeBuddyBuiltinCapability(modelID string) (TencentCodeBuddyModelCapability, bool) {
+	capability, ok := DefaultTencentCodeBuddyModelCapabilities()[modelID]
+	if efforts, hasEfforts := tencentCodeBuddyBuiltinEfforts[modelID]; hasEfforts {
+		capability = capability.mergeMissing(efforts)
+		ok = true
+	}
+	return capability, ok
 }
 
 // ===== 解析 =====
@@ -205,6 +247,22 @@ func parseTencentCodeBuddyModelCapabilityItem(item gjson.Result) TencentCodeBudd
 	if v := item.Get("disabledMultimodal"); v.Type == gjson.True {
 		supports := false
 		capability.SupportsImages = &supports
+	}
+	for _, v := range item.Get("reasoning.supportedEfforts").Array() {
+		if effort := strings.ToLower(strings.TrimSpace(v.String())); effort != "" {
+			capability.SupportedEfforts = append(capability.SupportedEfforts, effort)
+		}
+	}
+	if len(capability.SupportedEfforts) > 0 {
+		// 新字段 defaultEffort 优先，老模型回落 effort；不在档位表里的默认档不采信。
+		for _, key := range []string{"reasoning.defaultEffort", "reasoning.effort"} {
+			if def := strings.ToLower(strings.TrimSpace(item.Get(key).String())); def != "" {
+				if stringSliceContains(capability.SupportedEfforts, def) {
+					capability.DefaultEffort = def
+				}
+				break
+			}
+		}
 	}
 	if capability.IsEmpty() {
 		return capability
@@ -325,7 +383,7 @@ func (a *Account) GetTencentCodeBuddyModelCapabilitySnapshot() *TencentCodeBuddy
 // 快照缺的字段用内置表补。
 func (a *Account) TencentCodeBuddyModelCapability(upstreamModel string) (TencentCodeBuddyModelCapability, string) {
 	upstreamModel = strings.TrimSpace(upstreamModel)
-	builtin, hasBuiltin := DefaultTencentCodeBuddyModelCapabilities()[upstreamModel]
+	builtin, hasBuiltin := tencentCodeBuddyBuiltinCapability(upstreamModel)
 	if snapshot := a.GetTencentCodeBuddyModelCapabilitySnapshot(); snapshot != nil {
 		if capability, ok := snapshot.Models[upstreamModel]; ok && !capability.IsEmpty() {
 			return capability.mergeMissing(builtin), TencentCodeBuddyCapabilitySourceUpstream
@@ -422,18 +480,44 @@ func ResolveTencentCodeBuddyGroupModelCapability(accounts []Account, modelID str
 				result.SupportsImages = &v
 			}
 		}
+		result.SupportedEfforts, result.DefaultEffort = intersectTencentCodeBuddyEfforts(
+			result.SupportedEfforts, result.DefaultEffort, capability.SupportedEfforts, capability.DefaultEffort)
 		if capabilitySource == TencentCodeBuddyCapabilitySourceUpstream {
 			source = capabilitySource
 		}
 	}
 	if !found {
 		// 分组里没有账号认领该模型（或都无数据）时，仍可用内置表给出参考值。
-		if builtin, ok := DefaultTencentCodeBuddyModelCapabilities()[modelID]; ok {
+		if builtin, ok := tencentCodeBuddyBuiltinCapability(modelID); ok {
 			return builtin, TencentCodeBuddyCapabilitySourceBuiltin
 		}
 		return TencentCodeBuddyModelCapability{}, TencentCodeBuddyCapabilitySourceDefault
 	}
 	return result, source
+}
+
+// intersectTencentCodeBuddyEfforts 合并两个账号的档位声明：取交集（只声明所有账号都接受的档位），
+// 有一方未知时沿用另一方。默认档不在交集里时清空。
+func intersectTencentCodeBuddyEfforts(a []string, aDefault string, b []string, bDefault string) ([]string, string) {
+	if len(a) == 0 {
+		return append([]string(nil), b...), bDefault
+	}
+	if len(b) == 0 {
+		return a, aDefault
+	}
+	out := make([]string, 0, len(a))
+	for _, effort := range a {
+		if stringSliceContains(b, effort) {
+			out = append(out, effort)
+		}
+	}
+	if len(out) == 0 {
+		return nil, ""
+	}
+	if !stringSliceContains(out, aDefault) {
+		aDefault = ""
+	}
+	return out, aDefault
 }
 
 // minPositiveInt64 返回两个值中较小的正数；有一方 <=0（未知）时返回另一方。
