@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +31,9 @@ type TencentCodeBuddyCredential struct {
 	// 为空时回落到 region 默认值。
 	Domain    string
 	ExpiresAt *time.Time
+	// IssuedAt 是 access_token（JWT）的签发时间，仅用于判断"今天是否已保活刷新"。
+	// 令牌不是 JWT 或没有 iat 时为 nil。
+	IssuedAt *time.Time
 }
 
 // ParseTencentCodeBuddyCredential 从 accounts.credentials 解析强类型凭据。
@@ -41,16 +46,55 @@ func ParseTencentCodeBuddyCredential(credentials map[string]any) TencentCodeBudd
 	if domain == "" {
 		domain = ResolveTencentCodeBuddyEndpoint(product, region).Domain
 	}
+	accessToken := strings.TrimSpace(credentialString(credentials, tencentCodeBuddyCredAccessToken))
+	issuedAt, jwtExpiresAt := tencentCodeBuddyJWTTimes(accessToken)
+	expiresAt := credentialTime(credentials, tencentCodeBuddyCredExpiresAt)
+	if expiresAt == nil {
+		// 扫码登录与编辑表单都没有回传 expires_at，存量账号普遍缺这个字段；
+		// 从 JWT 的 exp 兜底，否则这类账号永远不会进入刷新窗口。
+		expiresAt = jwtExpiresAt
+	}
 	return TencentCodeBuddyCredential{
-		AccessToken:  strings.TrimSpace(credentialString(credentials, tencentCodeBuddyCredAccessToken)),
+		AccessToken:  accessToken,
 		RefreshToken: strings.TrimSpace(credentialString(credentials, tencentCodeBuddyCredRefreshToken)),
 		UserID:       strings.TrimSpace(credentialString(credentials, tencentCodeBuddyCredUserID)),
 		EnterpriseID: strings.TrimSpace(credentialString(credentials, tencentCodeBuddyCredEnterpriseID)),
 		Product:      product,
 		Region:       region,
 		Domain:       domain,
-		ExpiresAt:    credentialTime(credentials, tencentCodeBuddyCredExpiresAt),
+		ExpiresAt:    expiresAt,
+		IssuedAt:     issuedAt,
 	}
+}
+
+// tencentCodeBuddyJWTTimes 不验签地读取 access_token（JWT）的 iat / exp。
+// 只用于刷新调度，不用于鉴权；令牌不是 JWT 或字段缺失时对应返回 nil。
+func tencentCodeBuddyJWTTimes(token string) (issuedAt, expiresAt *time.Time) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return nil, nil
+	}
+	var claims struct {
+		IssuedAt  json.Number `json:"iat"`
+		ExpiresAt json.Number `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, nil
+	}
+	return jwtNumericDate(claims.IssuedAt), jwtNumericDate(claims.ExpiresAt)
+}
+
+func jwtNumericDate(n json.Number) *time.Time {
+	sec, err := n.Float64()
+	if err != nil || sec <= 0 {
+		return nil
+	}
+	t := time.Unix(int64(sec), 0).UTC()
+	return &t
 }
 
 // Endpoint 返回该凭据对应的官方接入点（由 product + region 内部决定）。
@@ -68,14 +112,26 @@ func (c TencentCodeBuddyCredential) HasAccessToken() bool {
 	return c.AccessToken != ""
 }
 
-// NeedsRefresh 报告是否需要在 window 内刷新。
-// expires_at 缺失时返回 false——与既有 refresh policy 一致：没有过期信息就不主动
-// 刷新，避免对静态长期令牌做无谓的续期请求。
+// tencentCodeBuddyKeepaliveInterval 是保活刷新间隔：access_token 签发超过该时长就刷新。
+// 参考 workbuddy2api 每天对全部账号刷新一次；上游实测 expiresIn 为 60 天，
+// 但 refresh_token 的闲置失效期未知，按天轮换最稳妥。
+const tencentCodeBuddyKeepaliveInterval = 24 * time.Hour
+
+// tencentCodeBuddyMinRefreshWindow 是到期前的最小刷新提前量。全局默认窗口只有
+// 30 分钟（为 1 小时令牌设计），对 60 天令牌而言一次刷新失败就会直接过期；
+// 拉长到 7 天，失败后还有足够多的周期重试。令牌没有 iat 时它是唯一的刷新依据。
+const tencentCodeBuddyMinRefreshWindow = 7 * 24 * time.Hour
+
+// NeedsRefresh 报告是否该刷新：进入到期窗口（至少提前 7 天），或令牌已签发满一天。
+// 过期时间与签发时间都未知时返回 false：没有依据就不主动刷新。
 func (c TencentCodeBuddyCredential) NeedsRefresh(now time.Time, window time.Duration) bool {
-	if c.ExpiresAt == nil {
-		return false
+	if window < tencentCodeBuddyMinRefreshWindow {
+		window = tencentCodeBuddyMinRefreshWindow
 	}
-	return c.ExpiresAt.Sub(now) < window
+	if c.ExpiresAt != nil && c.ExpiresAt.Sub(now) < window {
+		return true
+	}
+	return c.IssuedAt != nil && now.Sub(*c.IssuedAt) >= tencentCodeBuddyKeepaliveInterval
 }
 
 // Apply 返回 base 的副本，并把本结构的字段写回。base 中的其它键（model_mapping、

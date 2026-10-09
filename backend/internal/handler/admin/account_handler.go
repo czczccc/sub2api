@@ -69,6 +69,13 @@ type AccountHandler struct {
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
+	codeBuddyProvider       *service.TencentCodeBuddyProvider
+}
+
+// SetTencentCodeBuddyProvider attaches the CodeBuddy / WorkBuddy provider used by
+// the manual "refresh token" action.
+func (h *AccountHandler) SetTencentCodeBuddyProvider(provider *service.TencentCodeBuddyProvider) {
+	h.codeBuddyProvider = provider
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -1403,6 +1410,10 @@ func (h *AccountHandler) PreviewFromCRS(c *gin.Context) {
 // refreshSingleAccount refreshes credentials for a single OAuth account.
 // Returns (updatedAccount, warning, error) where warning is used for Antigravity ProjectIDMissing scenario.
 func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
+	// CodeBuddy / WorkBuddy 以 apikey 类型落库，但持有 refresh_token，单独放行。
+	if account.IsTencentCodeBuddy() {
+		return h.refreshTencentCodeBuddyAccount(ctx, account)
+	}
 	if !account.IsOAuth() {
 		return nil, "", infraerrors.BadRequest("NOT_OAUTH", "cannot refresh non-OAuth account")
 	}
@@ -1539,6 +1550,32 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	// Antigravity OAuth: 刷新成功后检查并设置 privacy_mode
 	h.adminService.EnsureAntigravityPrivacy(ctx, updatedAccount)
 
+	return updatedAccount, "", nil
+}
+
+// refreshTencentCodeBuddyAccount 用 refresh_token 换新 access_token 并落库。
+// 刷新成功说明凭据可用，账号若处于错误状态（多为令牌过期导致的 401）一并清除。
+func (h *AccountHandler) refreshTencentCodeBuddyAccount(ctx context.Context, account *service.Account) (*service.Account, string, error) {
+	if h.codeBuddyProvider == nil {
+		return nil, "", fmt.Errorf("tencent codebuddy provider is not configured")
+	}
+	newCredentials, err := h.codeBuddyProvider.Refresh(ctx, account)
+	if err != nil {
+		return nil, "", err
+	}
+	updatedAccount, err := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
+		Credentials: newCredentials,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if updatedAccount.Status == service.StatusError {
+		if cleared, clearErr := h.adminService.ClearAccountError(ctx, account.ID); clearErr != nil {
+			log.Printf("[WARN] Failed to clear error for codebuddy account %d after refresh: %v", account.ID, clearErr)
+		} else if cleared != nil {
+			updatedAccount = cleared
+		}
+	}
 	return updatedAccount, "", nil
 }
 

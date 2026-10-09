@@ -40,7 +40,7 @@ func TestTencentCodeBuddyStartAuthSession(t *testing.T) {
 	require.Len(t, requests, 1)
 	require.Equal(t, http.MethodPost, requests[0].Method)
 	require.Equal(t, "https://copilot.tencent.com/v2/plugin/auth/state?platform=CLI", requests[0].URL)
-	require.Equal(t, tencentCodeBuddyUserAgent, requests[0].Header.Get("User-Agent"))
+	require.Equal(t, "WorkBuddy/5.5.4 WorkBuddy/5.5.4 CLI/2.137.1", requests[0].Header.Get("User-Agent"))
 	require.Equal(t, "{}", requests[0].Body)
 }
 

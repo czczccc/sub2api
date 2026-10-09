@@ -23,11 +23,14 @@ const AccountPrivacyModeUnsetFilter = "__unset__"
 // accounts. Candidate platforms are supplied by TokenRefreshService's refresher
 // registry so repository eligibility cannot drift from registered providers.
 type OAuthRefreshPageOptions struct {
-	Platforms            []string
-	AfterID              int64
-	Limit                int
-	ActiveOnly           bool
-	IncludeSetupToken    bool
+	Platforms         []string
+	AfterID           int64
+	Limit             int
+	ActiveOnly        bool
+	IncludeSetupToken bool
+	// APIKeyPlatforms 额外纳入这些平台的 apikey 类型账号。CodeBuddy / WorkBuddy
+	// 以 apikey 类型落库，但持有可轮换的 refresh_token，同样需要后台刷新。
+	APIKeyPlatforms      []string
 	RequireRefreshToken  bool
 	ExcludeRetryCooldown bool
 }

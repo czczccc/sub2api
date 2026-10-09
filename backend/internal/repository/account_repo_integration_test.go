@@ -406,6 +406,45 @@ func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_GrokCursorAndExclus
 	s.Require().NotContains([]int64{first[0].ID, first[1].ID}, second[0].ID)
 }
 
+func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_CodeBuddyAPIKeyIncluded() {
+	codeBuddy := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "codebuddy-apikey-included",
+		Platform:    service.PlatformTencentCodeBuddy,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"access_token": "at", "refresh_token": "rt"},
+	})
+	mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-api-key-still-excluded",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"api_key": "k", "refresh_token": "rt"},
+	})
+	grokOAuth := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "grok-oauth-included",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Credentials: map[string]any{"refresh_token": "rt"},
+	})
+
+	page, err := s.repo.ListOAuthRefreshCandidatePage(s.ctx, service.OAuthRefreshPageOptions{
+		Platforms:           []string{service.PlatformGrok, service.PlatformTencentCodeBuddy},
+		APIKeyPlatforms:     []string{service.PlatformTencentCodeBuddy},
+		Limit:               100,
+		ActiveOnly:          true,
+		IncludeSetupToken:   true,
+		RequireRefreshToken: true,
+	})
+	s.Require().NoError(err)
+	ids := make([]int64, 0, len(page.Accounts))
+	for _, a := range page.Accounts {
+		ids = append(ids, a.ID)
+	}
+	s.Require().ElementsMatch([]int64{codeBuddy.ID, grokOAuth.ID}, ids)
+}
+
 func (s *AccountRepoSuite) TestListWithFilters() {
 	tests := []struct {
 		name        string

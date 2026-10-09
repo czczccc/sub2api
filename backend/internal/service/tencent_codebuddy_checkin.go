@@ -31,8 +31,8 @@ import (
 const (
 	tencentCodeBuddyCheckinStatusPath = "/v2/billing/meter/checkin-activity-status"
 	tencentCodeBuddyCheckinClaimPath  = "/v2/billing/meter/daily-checkin"
-	// 桌面端签到请求的 UA；签到接口沿用客户端自身的 UA，避免风控差异。
-	tencentCodeBuddyCheckinUserAgent = "WorkBuddy"
+	// 签到、积分等 billing 接口沿用官方桌面端的单段 UA，避免风控差异。
+	tencentCodeBuddyCheckinUserAgent = tencentCodeBuddyBillingUserAgent
 	tencentCodeBuddyMaxCheckinBytes  = 64 * 1024
 	// 上游"今日已签"的业务码。
 	tencentCodeBuddyCheckinAlreadyCode = 10001

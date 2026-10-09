@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -231,14 +233,44 @@ func TestTencentCodeBuddyCredentialNeedsRefresh(t *testing.T) {
 	// 无 expires_at 不主动刷新。
 	require.False(t, TencentCodeBuddyCredential{}.NeedsRefresh(now, window))
 
-	future := now.Add(2 * time.Hour)
+	future := now.Add(30 * 24 * time.Hour)
 	require.False(t, TencentCodeBuddyCredential{ExpiresAt: &future}.NeedsRefresh(now, window))
 
-	soon := now.Add(10 * time.Minute)
+	// 60 天令牌：窗口至少提前 7 天，全局 30 分钟窗口不够用。
+	soon := now.Add(6 * 24 * time.Hour)
 	require.True(t, TencentCodeBuddyCredential{ExpiresAt: &soon}.NeedsRefresh(now, window))
+
+	// 保活：签发满一天就刷新；不满一天不刷新。
+	issuedYesterday := now.Add(-25 * time.Hour)
+	require.True(t, TencentCodeBuddyCredential{ExpiresAt: &future, IssuedAt: &issuedYesterday}.NeedsRefresh(now, window))
+	issuedToday := now.Add(-time.Hour)
+	require.False(t, TencentCodeBuddyCredential{ExpiresAt: &future, IssuedAt: &issuedToday}.NeedsRefresh(now, window))
 
 	past := now.Add(-time.Hour)
 	require.True(t, TencentCodeBuddyCredential{ExpiresAt: &past}.NeedsRefresh(now, window))
+}
+
+func TestParseTencentCodeBuddyCredentialJWTFallback(t *testing.T) {
+	iat := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	exp := iat.Add(60 * 24 * time.Hour)
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"iat":%d,"exp":%d,"sub":"u"}`, iat.Unix(), exp.Unix())))
+	token := "eyJhbGciOiJIUzI1NiJ9." + payload + ".sig"
+
+	cred := ParseTencentCodeBuddyCredential(map[string]any{"access_token": token})
+	require.NotNil(t, cred.ExpiresAt)
+	require.True(t, cred.ExpiresAt.Equal(exp))
+	require.NotNil(t, cred.IssuedAt)
+	require.True(t, cred.IssuedAt.Equal(iat))
+
+	// 显式 expires_at 优先于 JWT exp。
+	explicit := iat.Add(time.Hour)
+	cred = ParseTencentCodeBuddyCredential(map[string]any{"access_token": token, "expires_at": explicit.Format(time.RFC3339)})
+	require.True(t, cred.ExpiresAt.Equal(explicit))
+
+	// 非 JWT 令牌：两者都为空。
+	cred = ParseTencentCodeBuddyCredential(map[string]any{"access_token": "opaque-token"})
+	require.Nil(t, cred.ExpiresAt)
+	require.Nil(t, cred.IssuedAt)
 }
 
 // ===== 2. Endpoint 选择 =====
@@ -335,9 +367,11 @@ func TestTencentCodeBuddyClientRefreshToken_Success(t *testing.T) {
 	require.Equal(t, "rt-test", refreshHeader)
 	require.Equal(t, "plugin", sourceHeader)
 	// 身份头由客户端集中注入（与转发路径共用同一实现）。
-	require.Equal(t, tencentCodeBuddyUserAgent, requests[0].Header.Get("User-Agent"))
+	require.Equal(t, "WorkBuddy/5.5.4 WorkBuddy/5.5.4 CLI/2.137.1", requests[0].Header.Get("User-Agent"))
 	require.Equal(t, tencentCodeBuddyDomain, requests[0].Header.Get("X-Domain"))
 	require.Equal(t, "uid-1", requests[0].Header.Get("X-User-Id"))
+	// 刷新不是对话，不带用量归属头。
+	require.Empty(t, requests[0].Header.Get("X-Agent-Purpose"))
 	require.Equal(t, "ent-1", requests[0].Header.Get("X-Enterprise-Id"))
 	require.Equal(t, "ent-1", requests[0].Header.Get("X-Tenant-Id"))
 }
@@ -720,7 +754,17 @@ func (u *tencentCodeBuddyFailingUpstream) DoWithTLS(*http.Request, string, int64
 func TestApplyTencentCodeBuddyHeaders(t *testing.T) {
 	header := http.Header{}
 	applyTencentCodeBuddyHeaders(header, tencentCodeBuddyTestAccount(nil))
-	require.Equal(t, tencentCodeBuddyUserAgent, header.Get("User-Agent"))
+	require.Equal(t, "WorkBuddy/5.5.4 WorkBuddy/5.5.4 CLI/2.137.1", header.Get("User-Agent"))
+	require.Equal(t, "1", header.Get("X-CodeBuddy-Request"))
+	require.Equal(t, "zh-CN", header.Get("Accept-Language"))
+	require.Equal(t, "conversation", header.Get("X-Agent-Purpose"))
+	require.Equal(t, "WorkBuddy", header.Get("X-IDE-Name"))
+	require.Equal(t, "5.5.4", header.Get("X-IDE-Version"))
+	// 设备标识按 uid 稳定派生：同账号恒同值，不同账号不同。
+	require.Len(t, header.Get("X-Machine-ID"), 36)
+	require.Equal(t, tencentCodeBuddyStableID("uid-1", "machine"), header.Get("X-Machine-ID"))
+	require.NotEqual(t, header.Get("X-Machine-ID"), header.Get("X-Session-ID"))
+	require.NotEqual(t, tencentCodeBuddyStableID("uid-1", "machine"), tencentCodeBuddyStableID("uid-2", "machine"))
 	require.Equal(t, tencentCodeBuddyDomain, header.Get("X-Domain"))
 	require.Equal(t, "uid-1", header.Get("X-User-Id"))
 	require.Equal(t, "ent-1", header.Get("X-Enterprise-Id"))
@@ -733,6 +777,7 @@ func TestApplyTencentCodeBuddyHeaders(t *testing.T) {
 		tencentCodeBuddyCredEnterpriseID: "",
 	}))
 	require.Empty(t, sparse.Get("X-User-Id"))
+	require.Empty(t, sparse.Get("X-Machine-ID"))
 	require.Empty(t, sparse.Get("X-Enterprise-Id"))
 	require.Empty(t, sparse.Get("X-Tenant-Id"))
 

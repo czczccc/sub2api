@@ -169,6 +169,17 @@ func newTokenRefreshService(
 	return s
 }
 
+// apiKeyRefreshPlatforms 返回以 apikey 类型落库、但仍需后台刷新令牌的平台。
+// CodeBuddy / WorkBuddy 账号是 apikey 类型，凭据里却是会过期的 access_token。
+func (s *TokenRefreshService) apiKeyRefreshPlatforms() []string {
+	for _, registration := range s.registrations {
+		if registration.platform == PlatformTencentCodeBuddy && registration.refresher != nil {
+			return []string{PlatformTencentCodeBuddy}
+		}
+	}
+	return nil
+}
+
 func (s *TokenRefreshService) eligiblePlatforms() []string {
 	platforms := make([]string, 0, len(s.registrations))
 	for _, registration := range s.registrations {
@@ -558,6 +569,7 @@ func (s *TokenRefreshService) processRefreshContext(parent context.Context) {
 			Limit:                pageSize,
 			ActiveOnly:           true,
 			IncludeSetupToken:    true,
+			APIKeyPlatforms:      s.apiKeyRefreshPlatforms(),
 			RequireRefreshToken:  true,
 			ExcludeRetryCooldown: true,
 		})
@@ -1456,6 +1468,7 @@ func isNonRetryableRefreshError(err error) bool {
 		"unknown scope",
 		"subscription required",
 		"no active grok subscription",
+		tencentCodeBuddySessionDeadMarker, // CodeBuddy 会话失效（12153），需重新扫码
 	}
 	for _, needle := range nonRetryable {
 		if strings.Contains(msg, needle) {

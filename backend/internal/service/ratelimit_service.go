@@ -407,6 +407,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			return disable
 		}
 	}
+	// CodeBuddy / WorkBuddy 按上游业务码分类（见 ratelimit_codebuddy.go）；未识别的交回默认逻辑。
+	if account.IsTencentCodeBuddy() {
+		if handled, disable := s.handleTencentCodeBuddyError(ctx, account, statusCode, responseBody, upstreamMsg); handled {
+			return disable
+		}
+	}
 	// Cline 积分、花费上限与 ClinePass 超限按结构化错误区分，只冷却对应的钱包。
 	// 400 是请求错误，不能因回显的模型名或请求内容触发钱包冷却。
 	if account.IsCline() && (statusCode == http.StatusPaymentRequired ||

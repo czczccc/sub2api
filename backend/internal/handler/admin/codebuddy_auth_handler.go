@@ -37,6 +37,14 @@ func NewCodeBuddyAuthHandler(provider *service.TencentCodeBuddyProvider, account
 	return &CodeBuddyAuthHandler{provider: provider, accountRepo: accountRepo}
 }
 
+// Provider 返回底层 CodeBuddy provider，供账号通用操作（如手动刷新令牌）复用。
+func (h *CodeBuddyAuthHandler) Provider() *service.TencentCodeBuddyProvider {
+	if h == nil {
+		return nil
+	}
+	return h.provider
+}
+
 // RefreshCredits 查询账号剩余积分并写回 extra。
 //
 // 上游查询失败也会把错误写进 extra（codebuddy_credits_error），因此这里仍返回 200 +
