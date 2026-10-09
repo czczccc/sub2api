@@ -172,7 +172,16 @@ export default {
         domain: 'Domain (optional)',
         domainHint: "Leave empty to use the selected site's default domain (e.g. www.workbuddy.ai); set only when the account belongs to a different domain.",
         optional: 'optional',
-        hint: 'The upstream host is fixed by the selected site (CodeBuddy / WorkBuddy × Mainland / International); no Base URL needed.'
+        hint: 'The upstream host is fixed by the selected site (CodeBuddy / WorkBuddy × Mainland / International); no Base URL needed.',
+        autoCheckin: 'Daily auto check-in',
+        autoCheckinHint: "Claims the daily check-in credits with this account's stored token (never claims twice a day).",
+        lastCheckin: 'Last check-in',
+        checkinResults: {
+          claimed: 'Claimed',
+          already: 'Already checked in',
+          inactive: 'Campaign inactive',
+          failed: 'Failed'
+        }
       },
       cnProviders: {
         accountMode: {

@@ -238,6 +238,26 @@ describe('EditAccountModal / Tencent CodeBuddy', () => {
 
     wrapper.unmount()
   })
+  it('每日自动签到默认开启，关闭后在 extra 中显式写入 false', async () => {
+    const account = buildCodeBuddyAccount()
+    account.extra = { codebuddy_checkin_result: 'claimed', codebuddy_checkin_at: '2026-10-09T00:05:00Z' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await nextTick()
+
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="edit-codebuddy-auto-checkin"]')
+    expect(toggle.element.checked).toBe(true)
+    expect(wrapper.text()).toContain('admin.accounts.codebuddy.checkinResults.claimed')
+
+    await toggle.setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.codebuddy_auto_checkin).toBe(false)
+    expect(extra.codebuddy_checkin_result).toBe('claimed')
+
+    wrapper.unmount()
+  })
 })
 
 function buildAccount() {

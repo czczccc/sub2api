@@ -911,6 +911,14 @@ Probed upstream capabilities (2026-09-12):
 Context windows and output limits have no upstream source, so they are declared
 by an operator under **Settings → Model capabilities**.
 
+**Daily auto check-in** — a background task claims the WorkBuddy / CodeBuddy daily
+check-in credits with each account's stored access token (endpoints from
+[88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)). It
+checks status first and claims only when not yet checked in. Each account can opt out
+on its edit page, which also shows the last result; the global switch and interval are
+`gateway.codebuddy.auto_checkin_enabled` (default on) and
+`gateway.codebuddy.auto_checkin_interval_minutes` (default 180).
+
 > **Client note**: the gateway advertises `input_modalities` and reasoning levels,
 > but clients that keep their **own** model capability table (DSH, pi, …) will
 > still block images and hide the thinking selector until the same capabilities

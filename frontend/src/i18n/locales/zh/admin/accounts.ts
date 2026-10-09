@@ -375,7 +375,16 @@ export default {
         domain: 'Domain（可选）',
         domainHint: '留空即使用所选站点的默认域（如 www.workbuddy.ai）；仅在账号所属域不同时填写。',
         optional: '可选',
-        hint: '上游地址由系统按所选站点固定（CodeBuddy / WorkBuddy × 大陆 / 国际），无需填写 Base URL。'
+        hint: '上游地址由系统按所选站点固定（CodeBuddy / WorkBuddy × 大陆 / 国际），无需填写 Base URL。',
+        autoCheckin: '每日自动签到',
+        autoCheckinHint: '用该账号已存的令牌每天领取签到积分（已签过不会重复领取）。',
+        lastCheckin: '上次签到',
+        checkinResults: {
+          claimed: '领取成功',
+          already: '今日已签',
+          inactive: '活动未开启',
+          failed: '失败'
+        }
       },
       cnProviders: {
         accountMode: {

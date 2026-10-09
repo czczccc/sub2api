@@ -98,6 +98,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
+	codeBuddyCheckin *service.TencentCodeBuddyCheckinService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
 	claudeCodeVersionSync *service.ClaudeCodeVersionSyncService,
 	proxyExpiry *service.ProxyExpiryService,
@@ -268,6 +269,10 @@ func provideCleanup(
 				if cnProviderBalanceCheck != nil {
 					cnProviderBalanceCheck.Stop()
 				}
+				return nil
+			}},
+			{"TencentCodeBuddyCheckinService", func() error {
+				codeBuddyCheckin.Stop()
 				return nil
 			}},
 			{"OpenAICodexVersionSyncService", func() error {

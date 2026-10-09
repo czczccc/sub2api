@@ -141,6 +141,28 @@
             <p class="input-hint">{{ t('admin.accounts.codebuddy.domainHint') }}</p>
           </div>
           <p class="input-hint">{{ t('admin.accounts.codebuddy.hint') }}</p>
+          <div>
+            <label class="flex items-center gap-2">
+              <input
+                v-model="editCodeBuddyAutoCheckin"
+                type="checkbox"
+                data-testid="edit-codebuddy-auto-checkin"
+                class="h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500 dark:border-dark-500"
+              />
+              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.accounts.codebuddy.autoCheckin') }}
+              </span>
+            </label>
+            <p class="input-hint">{{ t('admin.accounts.codebuddy.autoCheckinHint') }}</p>
+            <p v-if="account?.extra?.codebuddy_checkin_at" class="input-hint">
+              {{ t('admin.accounts.codebuddy.lastCheckin') }}:
+              {{ formatDateTime(new Date(String(account.extra.codebuddy_checkin_at))) }}
+              · {{ codeBuddyCheckinResultLabel }}
+              <template v-if="account.extra.codebuddy_checkin_message">
+                · {{ account.extra.codebuddy_checkin_message }}
+              </template>
+            </p>
+          </div>
         </template>
 
         <!-- OpenCode Zen vs GO -->
@@ -3462,6 +3484,15 @@ const editCodeBuddyUserID = ref('')
 const editCodeBuddyEnterpriseID = ref('')
 const editCodeBuddyDomain = ref('')
 const editCodeBuddySiteSelection = ref(codeBuddySiteKey('codebuddy', 'china'))
+// 每日自动签到：后端默认开启，只有 extra.codebuddy_auto_checkin === false 才视为关闭。
+const editCodeBuddyAutoCheckin = ref(true)
+const codeBuddyCheckinResultLabel = computed(() => {
+  const result = props.account?.extra?.codebuddy_checkin_result
+  const known = ['claimed', 'already', 'inactive', 'failed']
+  return typeof result === 'string' && known.includes(result)
+    ? t(`admin.accounts.codebuddy.checkinResults.${result}`)
+    : String(result ?? '')
+})
 const isCodeBuddyAccount = computed(() => isCodeBuddyPlatform(props.account?.platform ?? ''))
 
 /** 当前编辑中的站点（product/region + 默认 X-Domain）。 */
@@ -4578,6 +4609,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       editCodeBuddyUserID.value = readCodeBuddyCredentialField(credentials, 'uid')
       editCodeBuddyEnterpriseID.value = readCodeBuddyCredentialField(credentials, 'enterprise_id')
       editCodeBuddyDomain.value = readCodeBuddyCredentialField(credentials, 'domain')
+      editCodeBuddyAutoCheckin.value =
+        (newAccount.extra as Record<string, unknown> | undefined)?.codebuddy_auto_checkin !== false
       // 站点回填：缺失 product/region 的存量账号即大陆 CodeBuddy（历史默认）。
       editCodeBuddySiteSelection.value = codeBuddySiteKey(
         readCodeBuddyCredentialField(credentials, 'product') || 'codebuddy',
@@ -5728,6 +5761,18 @@ const handleSubmit = async () => {
         newExtra.allow_overages = true
       } else {
         delete newExtra.allow_overages
+      }
+      updatePayload.extra = newExtra
+    }
+
+    // Tencent CodeBuddy / WorkBuddy：每日自动签到开关写入 extra（关闭时显式存 false）。
+    if (isCodeBuddyAccount.value) {
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      if (editCodeBuddyAutoCheckin.value) {
+        delete newExtra.codebuddy_auto_checkin
+      } else {
+        newExtra.codebuddy_auto_checkin = false
       }
       updatePayload.extra = newExtra
     }

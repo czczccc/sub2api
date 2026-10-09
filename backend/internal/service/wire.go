@@ -902,6 +902,7 @@ var ProviderSet = wire.NewSet(
 	ProvideCNProviderQuotaService,
 	ProvideCNProviderBalanceService,
 	ProvideCNProviderBalanceCheckService,
+	ProvideTencentCodeBuddyCheckinService,
 	// TencentCodeBuddyProvider：CodeBuddy/WorkBuddy 的 token 刷新与模型目录能力。
 	// 由 ProvideTokenRefreshService 消费（access_token 为短期令牌，需后台续期）。
 	NewTencentCodeBuddyProvider,
