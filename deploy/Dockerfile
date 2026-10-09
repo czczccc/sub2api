@@ -18,7 +18,11 @@ ARG GOSUMDB=sum.golang.google.cn
 FROM ${NODE_IMAGE} AS frontend-builder
 
 WORKDIR /app/frontend
-ENV NODE_OPTIONS=--max-old-space-size=1536
+# 前端构建的 Node 堆内存上限：GitHub runner 上构建需要 4G，
+# 之前 1536M 会在 pnpm run build 时 heap OOM（exit 134）。
+# 小内存机器本地构建可用 --build-arg NODE_MAX_OLD_SPACE_SIZE=1536 降回去。
+ARG NODE_MAX_OLD_SPACE_SIZE=4096
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
 
 # Install pnpm. Keep this pinned to the lockfile-compatible major version so
 # Docker builds remain reproducible when pnpm changes config validation rules.
