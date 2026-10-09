@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"strconv"
+
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -21,13 +23,41 @@ import (
 // product × region 决定站点（CodeBuddy/WorkBuddy × 大陆/国际）。两个接口必须收到
 // **同一组**取值：轮询要去同一个站点取凭据，且写回的 credentials 要带上这两个维度。
 // 取值非法时由 service 层归一化回落到大陆 CodeBuddy，不会报错。
+//
+// 另提供账号剩余积分的手动刷新：
+//
+//	POST /admin/accounts/:id/codebuddy/credits/refresh → 写回 extra 的积分字段
 type CodeBuddyAuthHandler struct {
-	provider *service.TencentCodeBuddyProvider
+	provider    *service.TencentCodeBuddyProvider
+	accountRepo service.AccountRepository
 }
 
 // NewCodeBuddyAuthHandler 构造 handler。
-func NewCodeBuddyAuthHandler(provider *service.TencentCodeBuddyProvider) *CodeBuddyAuthHandler {
-	return &CodeBuddyAuthHandler{provider: provider}
+func NewCodeBuddyAuthHandler(provider *service.TencentCodeBuddyProvider, accountRepo service.AccountRepository) *CodeBuddyAuthHandler {
+	return &CodeBuddyAuthHandler{provider: provider, accountRepo: accountRepo}
+}
+
+// RefreshCredits 查询账号剩余积分并写回 extra。
+//
+// 上游查询失败也会把错误写进 extra（codebuddy_credits_error），因此这里仍返回 200 +
+// 写入的字段，让前端照常展示错误原因；只有账号不存在、平台不对或落库失败才走错误响应。
+func (h *CodeBuddyAuthHandler) RefreshCredits(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	account, err := h.accountRepo.GetByID(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	updates, err := service.RefreshTencentCodeBuddyCredits(c.Request.Context(), h.accountRepo, h.provider.Client(), account)
+	if updates == nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"extra": updates})
 }
 
 // Start 生成授权链接。

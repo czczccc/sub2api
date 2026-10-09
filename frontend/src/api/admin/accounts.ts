@@ -722,6 +722,19 @@ export async function pollCodeBuddyAuth(
   return data
 }
 
+/** 剩余积分刷新结果：后端写回 account.extra 的积分字段（失败时只有 error 与时间）。 */
+export interface CodeBuddyCreditsRefreshResult {
+  extra: Record<string, unknown>
+}
+
+/** 查询 WorkBuddy / CodeBuddy 大陆站账号剩余积分并写回 extra。 */
+export async function refreshCodeBuddyCredits(id: number): Promise<CodeBuddyCreditsRefreshResult> {
+  const { data } = await apiClient.post<CodeBuddyCreditsRefreshResult>(
+    `/admin/accounts/${id}/codebuddy/credits/refresh`
+  )
+  return data
+}
+
 export interface CRSPreviewAccount {
   crs_account_id: string
   kind: string
@@ -1227,6 +1240,7 @@ export const accountsAPI = {
   syncUpstreamModelsPreview,
   startCodeBuddyAuth,
   pollCodeBuddyAuth,
+  refreshCodeBuddyCredits,
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,
