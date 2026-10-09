@@ -408,10 +408,10 @@ func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_GrokCursorAndExclus
 
 func (s *AccountRepoSuite) TestListOAuthRefreshCandidatePage_CodeBuddyAPIKeyIncluded() {
 	codeBuddy := mustCreateAccount(s.T(), s.client, &service.Account{
-		Name:        "codebuddy-apikey-included",
-		Platform:    service.PlatformTencentCodeBuddy,
-		Type:        service.AccountTypeAPIKey,
-		Status:      service.StatusActive,
+		Name:     "codebuddy-apikey-included",
+		Platform: service.PlatformTencentCodeBuddy,
+		Type:     service.AccountTypeAPIKey,
+		Status:   service.StatusActive,
 		Credentials: map[string]any{
 			"access_token":  "at",
 			"refresh_token": "rt",
