@@ -28,9 +28,11 @@ ENV NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
 # Docker builds remain reproducible when pnpm changes config validation rules.
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
-# Install dependencies first (better caching)
+# Install dependencies first (better caching).
+# pnpm store 走 BuildKit 持久化缓存：即使 lockfile 变了，也不用重新下载全部依赖。
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 
 # Copy frontend source and build.
 # LegalDocumentView.vue (admin-compliance gate) build-time imports
@@ -61,9 +63,11 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app/backend
 
-# Copy go mod files first (better caching)
+# Copy go mod files first (better caching).
+# go module 缓存走 BuildKit 持久化缓存，跨构建复用。
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy backend source first
 COPY backend/ ./
@@ -73,7 +77,11 @@ COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
 
 # Build the binary (BuildType=release for CI builds, embed frontend)
 # Version precedence: build arg VERSION > exact git tag > cmd/server/VERSION
-RUN VERSION_VALUE="${VERSION}" && \
+# Go 编译缓存（GOCACHE）+ module 缓存走 BuildKit 持久化缓存：
+# 后端小改时只增量编译，不用每次全量重编（原来每次 2~5 分钟）。
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    VERSION_VALUE="${VERSION}" && \
     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=0 GOOS=linux go build \
