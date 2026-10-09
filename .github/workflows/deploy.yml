@@ -4,13 +4,56 @@ on:
   push:
     branches: [main]
 
-# 同一时间只跑一个部署：后一次排队等前一次结束，避免两次 docker build 在 VPS 上抢资源。
+# 同一时间只跑一个部署：后一次排队等前一次结束，避免两次部署互相覆盖。
 concurrency:
   group: deploy-tokyo-vps
   cancel-in-progress: false
 
+# 推送 GHCR 需要 packages: write
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: czczccc/sub2api
+
 jobs:
+  # 在 GitHub runner 上编译镜像并推送到 GHCR，VPS 只负责拉取。
+  # runner 性能远强于 VPS 2 核，且带 GHA 缓存，增量构建只需几分钟。
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
@@ -19,9 +62,12 @@ jobs:
           host: 207.148.92.152
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 60m
+          command_timeout: 30m
           script: |
             cd /opt/sub2api
             git pull origin main
             cd deploy
-            docker compose up -d --build
+            docker compose pull sub2api
+            docker compose up -d
+            # 清理拉取后变成 dangling 的旧镜像，防止小盘 VPS 被占满
+            docker image prune -f

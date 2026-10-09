@@ -16,7 +16,8 @@ services:
   # Sub2API Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    # 由 GitHub Actions 构建并推送到 GHCR，VPS 只拉取（见 .github/workflows/deploy.yml）
+    image: ghcr.io/czczccc/sub2api:latest
     container_name: sub2api
     restart: unless-stopped
     security_opt:
