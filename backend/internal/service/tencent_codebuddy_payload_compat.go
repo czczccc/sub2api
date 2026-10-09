@@ -41,7 +41,7 @@ var tencentCodeBuddyEffortRank = map[string]int{"off": 0, "minimal": 1, "low": 2
 
 // prepareTencentCodeBuddyChatPayload 对出站 chat 请求体做兼容与省钱改写。
 // conversationID 是从客户端请求里解析出的会话标识（可空），只用于生成 prompt_cache_key。
-func prepareTencentCodeBuddyChatPayload(body []byte, account *Account, conversationID string) []byte {
+func prepareTencentCodeBuddyChatPayload(body []byte, account *Account, conversationID string, policy tencentCodeBuddyContentPolicy) []byte {
 	if len(body) == 0 {
 		return body
 	}
@@ -51,6 +51,9 @@ func prepareTencentCodeBuddyChatPayload(body []byte, account *Account, conversat
 	if err := decoder.Decode(&obj); err != nil || obj == nil {
 		return body
 	}
+
+	// 先替换/追加 system 提示词：后面的配对修复与回填都基于最终的消息列表。
+	applyTencentCodeBuddySystemPromptPolicy(obj, policy)
 
 	model, _ := obj["model"].(string)
 	capability := TencentCodeBuddyModelCapability{}
@@ -79,6 +82,12 @@ func prepareTencentCodeBuddyChatPayload(body []byte, account *Account, conversat
 	injectTencentCodeBuddyThinking(obj, capability.DefaultEffort)
 	normalizeTencentCodeBuddyReasoningEffort(obj, capability.SupportedEfforts)
 	backfillTencentCodeBuddyReasoningContent(obj)
+	// 脱敏放最后：回填镜像出来的 reasoning 字段也要洗到。
+	if policy.Sanitize {
+		if messages, ok := obj["messages"].([]any); ok {
+			sanitizeTencentCodeBuddyMessages(messages)
+		}
+	}
 	if account != nil {
 		injectTencentCodeBuddyPromptCacheKey(obj, account.TencentCodeBuddyCredential().UserID, conversationID)
 	}

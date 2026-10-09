@@ -577,6 +577,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
 		adminSettings.GET("/model-capabilities", h.Admin.Setting.GetModelCapabilities)
 		adminSettings.PUT("/model-capabilities", h.Admin.Setting.UpdateModelCapabilities)
+		adminSettings.GET("/workbuddy", h.Admin.Setting.GetWorkBuddyConfig)
+		adminSettings.PUT("/workbuddy", h.Admin.Setting.UpdateWorkBuddyConfig)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)

@@ -220,6 +220,8 @@ func (s *RateLimitService) handleTencentCodeBuddyError(
 			return true, false
 		}
 		if !tencentCodeBuddyHasEnvelope(responseBody) {
+			// 同一出口短时间内多个账号被 WAF 拦截时判定为 IP 级拦截，后续请求直接快速失败。
+			tencentCodeBuddyWAFIP.Note(tencentCodeBuddyEgressKey(account), account.ID, now)
 			return true, s.setTencentCodeBuddyTempUnschedulable(ctx, account, now.Add(tencentCodeBuddyWAFCooldown),
 				tencentCodeBuddyWAFReason)
 		}

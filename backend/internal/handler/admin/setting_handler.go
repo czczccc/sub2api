@@ -127,6 +127,37 @@ func (h *SettingHandler) UpdateModelCapabilities(c *gin.Context) {
 	response.Success(c, normalized)
 }
 
+// GetWorkBuddyConfig 返回 WorkBuddy 网关行为配置（指纹脱敏、系统提示词模式等）。
+//
+// GET /api/v1/admin/settings/workbuddy
+func (h *SettingHandler) GetWorkBuddyConfig(c *gin.Context) {
+	cfg := h.settingService.GetWorkBuddyConfig(c.Request.Context())
+	response.Success(c, gin.H{
+		"config":         cfg,
+		"default_prompt": service.TencentCodeBuddyDefaultSystemPrompt,
+	})
+}
+
+// UpdateWorkBuddyConfig 覆盖保存 WorkBuddy 网关行为配置。
+//
+// PUT /api/v1/admin/settings/workbuddy
+func (h *SettingHandler) UpdateWorkBuddyConfig(c *gin.Context) {
+	var req service.WorkBuddyConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	normalized, err := h.settingService.UpdateWorkBuddyConfig(c.Request.Context(), req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{
+		"config":         normalized,
+		"default_prompt": service.TencentCodeBuddyDefaultSystemPrompt,
+	})
+}
+
 // GetSettings 获取所有系统设置
 // GET /api/v1/admin/settings
 func (h *SettingHandler) GetSettings(c *gin.Context) {

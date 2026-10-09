@@ -11,6 +11,7 @@ export default {
         gateway: 'Gateway',
         email: 'Email',
         modelCapabilities: 'Model capabilities',
+        workbuddy: 'WorkBuddy',
         backup: 'Backup',
         payment: 'Payment',
       },
