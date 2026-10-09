@@ -586,7 +586,9 @@ func (p *TencentCodeBuddyProvider) FetchModelIDs(ctx context.Context, account *A
 	return models, nil
 }
 
-// parseTencentCodeBuddyModelIDs 解析上游模型目录响应。
+// parseTencentCodeBuddyModelIDsForProduct 解析对应产品的上游模型目录。国际版 WorkBuddy
+// 的 data.models 是客户端模型选择器使用的实时目录；大陆 CodeBuddy 则以 cli agent
+// 的 models 为可用清单，不能把两种产品的目录语义混为一谈。
 //
 // 上游真实形态（见 tencentCodeBuddyModelsPath 注释）：
 //
@@ -595,13 +597,6 @@ func (p *TencentCodeBuddyProvider) FetchModelIDs(ctx context.Context, account *A
 //
 // CLI agent 的 models 是可用清单，models[] 提供 disabled 元信息。为了让实现对
 // 上游形态变化更耐受，同时接受 OpenAI 风格 {"data":[{"id":...}]} 与纯字符串数组。
-func parseTencentCodeBuddyModelIDs(body []byte) []string {
-	return parseTencentCodeBuddyModelIDsForProduct(body, TencentCodeBuddyProductCodeBuddy)
-}
-
-// parseTencentCodeBuddyModelIDsForProduct 解析对应产品的上游模型目录。国际版 WorkBuddy
-// 的 data.models 是客户端模型选择器使用的实时目录；大陆 CodeBuddy 则以 cli agent
-// 的 models 为可用清单，不能把两种产品的目录语义混为一谈。
 func parseTencentCodeBuddyModelIDsForProduct(body []byte, product string) []string {
 	var payload struct {
 		Data json.RawMessage `json:"data"`
