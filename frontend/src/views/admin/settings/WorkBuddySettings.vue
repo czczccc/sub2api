@@ -133,6 +133,30 @@
         </div>
       </section>
 
+      <section class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div>
+          <h4 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.workbuddySettings.credits.title') }}</h4>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.workbuddySettings.credits.description') }}</p>
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label class="space-y-1">
+            <span class="block text-xs text-gray-600 dark:text-gray-300">{{ t('admin.workbuddySettings.credits.tokensPerCredit') }}</span>
+            <input v-model.number="config.credit_tokens_per_credit" type="number" min="1" step="1" class="input w-full py-1 text-sm" />
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.workbuddySettings.credits.tokensPerCreditHint') }}</span>
+          </label>
+          <label class="space-y-1">
+            <span class="block text-xs text-gray-600 dark:text-gray-300">{{ t('admin.workbuddySettings.credits.multiplier') }}</span>
+            <input v-model.number="config.deepseek_flash_multiplier" type="number" min="0" step="0.01" class="input w-full py-1 text-sm" />
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.workbuddySettings.credits.multiplierHint') }}</span>
+          </label>
+          <label class="space-y-1">
+            <span class="block text-xs text-gray-600 dark:text-gray-300">{{ t('admin.workbuddySettings.credits.outputPercent') }}</span>
+            <input v-model.number="config.credit_output_percent" type="number" min="0" max="100" step="1" class="input w-full py-1 text-sm" />
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.workbuddySettings.credits.outputPercentHint') }}</span>
+          </label>
+        </div>
+      </section>
+
       <div class="flex justify-end">
         <button type="button" class="btn btn-primary" :disabled="saving" @click="save">
           {{ saving ? t('common.saving') : t('common.save') }}
@@ -176,7 +200,10 @@ const config = ref<WorkBuddyConfig>({
   growth_task: emptySchedule(),
   blackcat_task: emptySchedule(),
   balance_refresh_disabled: false,
-  balance_refresh_minutes: 5
+  balance_refresh_minutes: 5,
+  credit_tokens_per_credit: 31874,
+  deepseek_flash_multiplier: 0,
+  credit_output_percent: 20
 })
 const runningTask = ref<WorkBuddyTask | null>(null)
 const hoursText = ref<Record<WorkBuddyScheduledTask, string>>({

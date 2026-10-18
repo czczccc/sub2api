@@ -1,4 +1,43 @@
 export default {
+  workbuddyCredits: {
+    action: 'Credits',
+    title: 'WorkBuddy credits summary',
+    reload: 'Reload',
+    remain: 'Remaining credits',
+    ofTotal: 'of {total}',
+    tokens: 'Approx. tokens (DeepSeek Flash)',
+    tokenSplit: 'Input {input} / output {output}',
+    noMultiplier: 'DeepSeek Flash multiplier missing; enter one or sync models first',
+    officialValue: 'Value at DeepSeek list price (off-peak)',
+    peakValue: 'Peak hours approx. ¥{cost}',
+    multiplier: 'DeepSeek Flash credit multiplier',
+    multiplierFromUpstream: 'From upstream model catalog ({model})',
+    multiplierFromSettings: 'From WorkBuddy settings',
+    multiplierManual: 'Edited here, not saved',
+    multiplierMissing: 'Not found in the upstream catalog; set it in Settings → WorkBuddy',
+    tokensPerCredit: 'Tokens per credit at 1x',
+    tokensPerCreditHint: 'Not official; community estimate by default',
+    outputPercent: 'Output token share (%)',
+    outputPercentHint: 'Used to price the tokens',
+    formula:
+      'Formula: remaining credits ÷ multiplier × tokens per credit = tokens. Value uses DeepSeek deepseek-flash cache-miss list prices: off-peak input ¥{idleInput} / output ¥{idleOutput}, peak input ¥{peakInput} / output ¥{peakOutput} per million tokens. Estimate only.',
+    pricingLink: 'DeepSeek pricing',
+    coverage: '{reported} of {count} accounts have credit data.',
+    unsupported: '{count} international accounts cannot be queried.',
+    errors: '{count} accounts failed their last query; their previous values are used.',
+    oldestChecked: 'Oldest data checked at {time}.',
+    earliestExpire: 'Earliest credits expire at {time}.',
+    columns: {
+      account: 'Account',
+      remain: 'Remaining / total',
+      expire: 'Earliest expiry',
+      checked: 'Checked at'
+    },
+    empty: 'No WorkBuddy accounts in this group',
+    queryFailed: 'Query failed',
+    notSupported: 'N/A',
+    loadFailed: 'Failed to load credits summary: {message}'
+  },
   workbuddySettings: {
     title: 'WorkBuddy gateway',
     description: 'Applies only to outbound requests of WorkBuddy (Tencent CodeBuddy platform) accounts.',
@@ -57,6 +96,16 @@ export default {
         balance: 'Refreshes remaining credits periodically; lifts the credits-exhausted pause once credits are back.'
       },
       balanceMinutes: 'Interval (minutes)'
+    },
+    credits: {
+      title: 'Credit conversion',
+      description: 'Parameters used by the group "Credits summary" to convert remaining credits into tokens and DeepSeek list prices. Display only.',
+      tokensPerCredit: 'Tokens per credit at 1x',
+      tokensPerCreditHint: 'Not published officially; the default 31874 is a community estimate. Calibrate it against your own usage details.',
+      multiplier: 'DeepSeek Flash credit multiplier',
+      multiplierHint: '0 uses the multiplier synced from the upstream model catalog; a positive value is used as-is.',
+      outputPercent: 'Output token share (%)',
+      outputPercentHint: 'Share of output tokens assumed when pricing the tokens at DeepSeek list prices.'
     },
     taskCenter: {
       open: 'Growth tasks',

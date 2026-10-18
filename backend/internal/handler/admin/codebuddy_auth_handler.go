@@ -2,6 +2,7 @@ package admin
 
 import (
 	"strconv"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -78,6 +79,27 @@ func (h *CodeBuddyAuthHandler) ModelCapabilities(c *gin.Context) {
 		return
 	}
 	response.Success(c, service.BuildTencentCodeBuddyModelCapabilityReport(accounts))
+}
+
+// CreditsSummary 汇总 WorkBuddy 账号的剩余积分；带 group_id 时只统计该分组。
+//
+// GET /admin/accounts/codebuddy/credits-summary?group_id=
+func (h *CodeBuddyAuthHandler) CreditsSummary(c *gin.Context) {
+	var groupID int64
+	if raw := strings.TrimSpace(c.Query("group_id")); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			response.BadRequest(c, "Invalid group_id")
+			return
+		}
+		groupID = id
+	}
+	accounts, err := h.accountRepo.ListByPlatform(c.Request.Context(), service.PlatformTencentCodeBuddy)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, service.BuildTencentCodeBuddyCreditsSummary(accounts, groupID))
 }
 
 // RefreshModelCapabilities 从上游重新拉取所有账号的模型能力快照，返回刷新后的报告。

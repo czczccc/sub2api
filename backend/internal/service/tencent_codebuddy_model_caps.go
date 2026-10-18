@@ -6,7 +6,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,11 +65,13 @@ type TencentCodeBuddyModelCapability struct {
 	SupportedEfforts []string `json:"supported_efforts,omitempty"`
 	// DefaultEffort 是模型声明的默认档位（reasoning.defaultEffort，老字段 reasoning.effort）。
 	DefaultEffort string `json:"default_effort,omitempty"`
+	// CreditMultiplier 是客户端模型选择器里显示的积分倍率（目录接口 models[].credits，如 x0.79）；0 表示未知。
+	CreditMultiplier float64 `json:"credit_multiplier,omitempty"`
 }
 
 // IsEmpty 报告是否没有任何能力字段。
 func (c TencentCodeBuddyModelCapability) IsEmpty() bool {
-	return c.ContextWindow <= 0 && c.MaxOutputTokens <= 0 && c.SupportsImages == nil && len(c.SupportedEfforts) == 0
+	return c.ContextWindow <= 0 && c.MaxOutputTokens <= 0 && c.SupportsImages == nil && len(c.SupportedEfforts) == 0 && c.CreditMultiplier <= 0
 }
 
 // InputModalities 把识图标记转成输入模态；未知时返回 nil。
@@ -100,6 +104,9 @@ func (c TencentCodeBuddyModelCapability) mergeMissing(fallback TencentCodeBuddyM
 	if len(c.SupportedEfforts) == 0 && len(fallback.SupportedEfforts) > 0 {
 		c.SupportedEfforts = append([]string(nil), fallback.SupportedEfforts...)
 		c.DefaultEffort = fallback.DefaultEffort
+	}
+	if c.CreditMultiplier <= 0 {
+		c.CreditMultiplier = fallback.CreditMultiplier
 	}
 	return c
 }
@@ -264,11 +271,38 @@ func parseTencentCodeBuddyModelCapabilityItem(item gjson.Result) TencentCodeBudd
 			}
 		}
 	}
+	capability.CreditMultiplier = parseTencentCodeBuddyCreditMultiplier(item)
 	if capability.IsEmpty() {
 		return capability
 	}
 	capability.DisplayName = strings.TrimSpace(item.Get("name").String())
 	return capability
+}
+
+var tencentCodeBuddyCreditMultiplierPattern = regexp.MustCompile(`\d+(?:\.\d+)?`)
+
+// parseTencentCodeBuddyCreditMultiplier 读取模型的积分倍率。上游可能给数字（0.79），
+// 也可能给展示文本（国际站实测 "x0.79 credits"，也兼容 "0.79x" / "×0.79"）；
+// 对象形态（如带折扣明细）跳过。
+func parseTencentCodeBuddyCreditMultiplier(item gjson.Result) float64 {
+	for _, key := range []string{"credits", "creditMultiplier", "credit_multiplier", "creditRate", "credit_rate"} {
+		v := item.Get(key)
+		if !v.Exists() || v.IsObject() || v.IsArray() {
+			continue
+		}
+		if v.Type == gjson.Number {
+			if f := v.Float(); f > 0 {
+				return f
+			}
+			continue
+		}
+		if match := tencentCodeBuddyCreditMultiplierPattern.FindString(v.String()); match != "" {
+			if f, err := strconv.ParseFloat(match, 64); err == nil && f > 0 {
+				return f
+			}
+		}
+	}
+	return 0
 }
 
 // firstPositiveInt 依次读取 keys，返回第一个正整数值（字符串数字也接受）。
@@ -299,7 +333,10 @@ func (c *TencentCodeBuddyClient) FetchModelCatalog(ctx context.Context, account 
 	}
 	missing := false
 	for _, id := range models {
-		if _, ok := capabilities[id]; !ok {
+		// 只带积分倍率不算有能力参数，仍需产品配置补齐上下文 / 输出上限。
+		capability := capabilities[id]
+		capability.CreditMultiplier = 0
+		if capability.IsEmpty() {
 			missing = true
 			break
 		}
