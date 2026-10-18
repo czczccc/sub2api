@@ -44,6 +44,14 @@ type WorkBuddyConfig struct {
 	// 余额定时刷新：积分恢复后自动解除"积分耗尽"暂停。
 	BalanceRefreshDisabled bool `json:"balance_refresh_disabled"`
 	BalanceRefreshMinutes  int  `json:"balance_refresh_minutes"`
+
+	// 分组积分折算（只影响后台展示）：
+	// CreditTokensPerCredit 是 1 倍率下每积分约等于多少 tokens（官方未公开，默认取社区实测估值）；
+	// DeepSeekFlashMultiplier > 0 时覆盖上游目录里的 DeepSeek Flash 积分倍率；
+	// CreditOutputPercent 是按 DeepSeek 官方价折算金额时假设的输出 token 占比（0–100）。
+	CreditTokensPerCredit   int64   `json:"credit_tokens_per_credit"`
+	DeepSeekFlashMultiplier float64 `json:"deepseek_flash_multiplier"`
+	CreditOutputPercent     *int    `json:"credit_output_percent"`
 }
 
 // WorkBuddyTaskSchedule 是单个日常任务的开关与执行时点。
@@ -74,6 +82,13 @@ var workBuddyDefaultTaskHours = map[string][]int{
 }
 
 const workBuddyDefaultBalanceRefreshMinutes = 5
+
+// 积分折算默认值：1 积分 ≈ 31,874 tokens 是社区多方实测的参考值（官方未公布换算），
+// 输出占比 20% 接近编码类对话的常见输入/输出比例。
+const (
+	workBuddyDefaultCreditTokensPerCredit int64 = 31874
+	workBuddyDefaultCreditOutputPercent         = 20
+)
 
 func normalizeWorkBuddyTaskSchedule(schedule WorkBuddyTaskSchedule, task string) WorkBuddyTaskSchedule {
 	seen := map[int]bool{}
@@ -134,6 +149,17 @@ func normalizeWorkBuddyConfig(cfg WorkBuddyConfig) WorkBuddyConfig {
 	if cfg.BalanceRefreshMinutes <= 0 {
 		cfg.BalanceRefreshMinutes = workBuddyDefaultBalanceRefreshMinutes
 	}
+	if cfg.CreditTokensPerCredit <= 0 {
+		cfg.CreditTokensPerCredit = workBuddyDefaultCreditTokensPerCredit
+	}
+	if cfg.DeepSeekFlashMultiplier < 0 {
+		cfg.DeepSeekFlashMultiplier = 0
+	}
+	outputPercent := workBuddyDefaultCreditOutputPercent
+	if cfg.CreditOutputPercent != nil {
+		outputPercent = min(max(*cfg.CreditOutputPercent, 0), 100)
+	}
+	cfg.CreditOutputPercent = &outputPercent
 	return cfg
 }
 

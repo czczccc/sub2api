@@ -421,6 +421,17 @@
                 }}</span>
               </button>
               <button
+                v-if="row.platform === 'codebuddy'"
+                data-testid="group-workbuddy-credits"
+                @click="handleWorkBuddyCredits(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-amber-600 dark:hover:bg-dark-700 dark:hover:text-amber-400"
+              >
+                <Icon name="chart" size="sm" />
+                <span class="text-xs">{{
+                  t("admin.workbuddyCredits.action")
+                }}</span>
+              </button>
+              <button
                 v-if="!authStore.isSimpleMode"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
@@ -4255,6 +4266,11 @@
     />
 
     <!-- Group RPM Overrides Modal -->
+    <WorkBuddyCreditsSummaryModal
+      :show="showWorkBuddyCreditsModal"
+      :group="workBuddyCreditsGroup"
+      @close="showWorkBuddyCreditsModal = false"
+    />
     <GroupRPMOverridesModal
       :show="showRPMOverridesModal"
       :group="rpmOverridesGroup"
@@ -4301,6 +4317,7 @@ import { platformLabel } from "@/utils/platformColors";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import WorkBuddyCreditsSummaryModal from "@/components/admin/group/WorkBuddyCreditsSummaryModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
@@ -4842,6 +4859,8 @@ const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
+const showWorkBuddyCreditsModal = ref(false);
+const workBuddyCreditsGroup = ref<AdminGroup | null>(null);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 type ConcreteGroupPlatform = Exclude<GroupPlatform, "composite">;
@@ -6422,6 +6441,11 @@ const handleRateMultipliers = (group: AdminGroup) => {
 const handleRPMOverrides = (group: AdminGroup) => {
   rpmOverridesGroup.value = group;
   showRPMOverridesModal.value = true;
+};
+
+const handleWorkBuddyCredits = (group: AdminGroup) => {
+  workBuddyCreditsGroup.value = group;
+  showWorkBuddyCreditsModal.value = true;
 };
 
 const handleDuplicate = async (group: AdminGroup) => {

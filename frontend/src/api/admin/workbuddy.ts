@@ -20,6 +20,12 @@ export interface WorkBuddyConfig {
   /** true 时关闭余额定时刷新。 */
   balance_refresh_disabled: boolean
   balance_refresh_minutes: number
+  /** 1 倍率下每积分约等于多少 tokens（官方未公开，默认取社区实测估值）。 */
+  credit_tokens_per_credit: number
+  /** > 0 时覆盖上游目录里的 DeepSeek Flash 积分倍率；0 表示用上游值。 */
+  deepseek_flash_multiplier: number
+  /** 按 DeepSeek 官方价折算金额时假设的输出 token 占比（0–100）。 */
+  credit_output_percent: number
 }
 
 /** 日常保号任务的开关与执行时点（北京时间整点）。 */
@@ -101,4 +107,41 @@ export async function claimWorkBuddyGrowthTask(accountId: number, code: string):
     `/admin/accounts/${accountId}/codebuddy/growth-tasks/${encodeURIComponent(code)}/claim`
   )
   return data.message
+}
+
+/** 分组积分汇总中的单个账号。 */
+export interface WorkBuddyAccountCredits {
+  id: number
+  name: string
+  status: string
+  /** false 表示不支持积分查询（国际版）。 */
+  supported: boolean
+  remain?: number
+  total?: number
+  expire_at?: string
+  checked_at?: string
+  error?: string
+}
+
+/** 一组 WorkBuddy 账号的积分汇总（取各账号最近一次查询结果）。 */
+export interface WorkBuddyCreditsSummary {
+  account_count: number
+  reported_count: number
+  unsupported_count: number
+  error_count: number
+  remain: number
+  total: number
+  used: number
+  earliest_expire_at?: string
+  oldest_checked_at?: string
+  /** 上游模型目录里的 DeepSeek Flash 积分倍率；没同步到时缺省。 */
+  deepseek_flash?: { model_id: string; multiplier: number; synced_at?: string }
+  accounts: WorkBuddyAccountCredits[]
+}
+
+export async function getWorkBuddyCreditsSummary(groupId?: number): Promise<WorkBuddyCreditsSummary> {
+  const { data } = await apiClient.get<WorkBuddyCreditsSummary>('/admin/accounts/codebuddy/credits-summary', {
+    params: groupId ? { group_id: groupId } : undefined
+  })
+  return data
 }

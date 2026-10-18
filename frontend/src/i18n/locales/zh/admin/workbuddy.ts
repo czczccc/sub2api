@@ -1,4 +1,43 @@
 export default {
+  workbuddyCredits: {
+    action: '积分汇总',
+    title: 'WorkBuddy 积分汇总',
+    reload: '重新加载',
+    remain: '剩余积分',
+    ofTotal: '共 {total}',
+    tokens: '约可用 tokens（DeepSeek Flash）',
+    tokenSplit: '输入 {input} / 输出 {output}',
+    noMultiplier: '缺少 DeepSeek Flash 倍率，请填写倍率或先同步模型',
+    officialValue: '按 DeepSeek 官方价约值（闲时）',
+    peakValue: '高峰时段约 ¥{cost}',
+    multiplier: 'DeepSeek Flash 积分倍率',
+    multiplierFromUpstream: '来自上游模型目录（{model}）',
+    multiplierFromSettings: '来自 WorkBuddy 设置',
+    multiplierManual: '临时修改，未保存',
+    multiplierMissing: '上游目录里没读到倍率，可在 设置 → WorkBuddy 填写',
+    tokensPerCredit: '1 倍率下每积分 ≈ tokens',
+    tokensPerCreditHint: '官方未公布，默认取社区估值',
+    outputPercent: '输出 token 占比（%）',
+    outputPercentHint: '用于按官方价折算金额',
+    formula:
+      '算法：剩余积分 ÷ 倍率 × 每积分 tokens = 可用 tokens；金额按 DeepSeek 官方 deepseek-flash 缓存未命中价计算，闲时输入 ¥{idleInput} / 输出 ¥{idleOutput}，高峰输入 ¥{peakInput} / 输出 ¥{peakOutput}（每百万 tokens）。结果仅供参考。',
+    pricingLink: 'DeepSeek 官方价格',
+    coverage: '{count} 个账号中 {reported} 个有积分数据。',
+    unsupported: '{count} 个国际版账号不支持查询。',
+    errors: '{count} 个账号最近一次查询失败，按上次结果计入。',
+    oldestChecked: '最旧数据查询于 {time}。',
+    earliestExpire: '最早一批积分 {time} 到期。',
+    columns: {
+      account: '账号',
+      remain: '剩余 / 总量',
+      expire: '最早到期',
+      checked: '查询时间'
+    },
+    empty: '这个分组里没有 WorkBuddy 账号',
+    queryFailed: '查询失败',
+    notSupported: '不支持',
+    loadFailed: '加载积分汇总失败：{message}'
+  },
   workbuddySettings: {
     title: 'WorkBuddy 网关设置',
     description: '只作用于 WorkBuddy（腾讯 CodeBuddy 平台）账号的出站请求。',
@@ -57,6 +96,16 @@ export default {
         balance: '定时刷新剩余积分；积分恢复后自动解除“积分耗尽”暂停。'
       },
       balanceMinutes: '刷新间隔（分钟）'
+    },
+    credits: {
+      title: '积分折算',
+      description: '分组「积分汇总」里把剩余积分折算成 tokens 和 DeepSeek 官方价时使用的参数，只影响展示。',
+      tokensPerCredit: '1 倍率下每积分 ≈ tokens',
+      tokensPerCreditHint: '官方未公布换算，默认 31874 是社区实测估值，可按自己的用量明细校准。',
+      multiplier: 'DeepSeek Flash 积分倍率',
+      multiplierHint: '填 0 使用上游模型目录里同步到的倍率；填正数则固定使用该值。',
+      outputPercent: '输出 token 占比（%）',
+      outputPercentHint: '按 DeepSeek 官方价折算金额时，假设可用 tokens 中输出所占的比例。'
     },
     taskCenter: {
       open: '成长任务',
