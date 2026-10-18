@@ -87,7 +87,7 @@ const workBuddyDefaultBalanceRefreshMinutes = 5
 // 输出占比 20% 接近编码类对话的常见输入/输出比例。
 const (
 	workBuddyDefaultCreditTokensPerCredit int64 = 31874
-	workBuddyDefaultCreditOutputPercent         = 20
+	workBuddyDefaultCreditOutputPercent   int   = 20
 )
 
 func normalizeWorkBuddyTaskSchedule(schedule WorkBuddyTaskSchedule, task string) WorkBuddyTaskSchedule {
