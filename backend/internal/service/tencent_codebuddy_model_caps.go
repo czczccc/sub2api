@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,8 +279,11 @@ func parseTencentCodeBuddyModelCapabilityItem(item gjson.Result) TencentCodeBudd
 	return capability
 }
 
+var tencentCodeBuddyCreditMultiplierPattern = regexp.MustCompile(`\d+(?:\.\d+)?`)
+
 // parseTencentCodeBuddyCreditMultiplier 读取模型的积分倍率。上游可能给数字（0.79），
-// 也可能给展示文本（"x0.79" / "0.79x" / "×0.79"）；对象形态（如带折扣明细）跳过。
+// 也可能给展示文本（国际站实测 "x0.79 credits"，也兼容 "0.79x" / "×0.79"）；
+// 对象形态（如带折扣明细）跳过。
 func parseTencentCodeBuddyCreditMultiplier(item gjson.Result) float64 {
 	for _, key := range []string{"credits", "creditMultiplier", "credit_multiplier", "creditRate", "credit_rate"} {
 		v := item.Get(key)
@@ -292,10 +296,10 @@ func parseTencentCodeBuddyCreditMultiplier(item gjson.Result) float64 {
 			}
 			continue
 		}
-		text := strings.ToLower(strings.TrimSpace(v.String()))
-		text = strings.Trim(text, "x×* ")
-		if f, err := strconv.ParseFloat(text, 64); err == nil && f > 0 {
-			return f
+		if match := tencentCodeBuddyCreditMultiplierPattern.FindString(v.String()); match != "" {
+			if f, err := strconv.ParseFloat(match, 64); err == nil && f > 0 {
+				return f
+			}
 		}
 	}
 	return 0
@@ -329,7 +333,10 @@ func (c *TencentCodeBuddyClient) FetchModelCatalog(ctx context.Context, account 
 	}
 	missing := false
 	for _, id := range models {
-		if _, ok := capabilities[id]; !ok {
+		// 只带积分倍率不算有能力参数，仍需产品配置补齐上下文 / 输出上限。
+		capability := capabilities[id]
+		capability.CreditMultiplier = 0
+		if capability.IsEmpty() {
 			missing = true
 			break
 		}

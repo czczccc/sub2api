@@ -9,13 +9,14 @@ import (
 
 func TestParseTencentCodeBuddyCreditMultiplier(t *testing.T) {
 	cases := map[string]float64{
-		`{"credits":0.79}`:           0.79,
-		`{"credits":"x0.03"}`:        0.03,
-		`{"credits":"1.5x"}`:         1.5,
-		`{"credits":{"base":1}}`:     0,
-		`{"creditMultiplier":"0.2"}`: 0.2,
-		`{"credits":"free"}`:         0,
-		`{}`:                         0,
+		`{"credits":0.79}`:            0.79,
+		`{"credits":"x0.79 credits"}`: 0.79,
+		`{"credits":"x0.03"}`:         0.03,
+		`{"credits":"1.5x"}`:          1.5,
+		`{"credits":{"base":1}}`:      0,
+		`{"creditMultiplier":"0.2"}`:  0.2,
+		`{"credits":"free"}`:          0,
+		`{}`:                          0,
 	}
 	for body, want := range cases {
 		require.InDelta(t, want, parseTencentCodeBuddyCreditMultiplier(gjson.Parse(body)), 1e-9, body)
